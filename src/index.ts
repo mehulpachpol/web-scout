@@ -14,7 +14,7 @@ if (TRUST_MODE) {
 
 const execAsync = promisify(exec);
 
-const ai = new GoogleGenAI({ apiKey: "AIzaSyD7hdfSf3bortXo91PTgcb-WaGbjnOmBLU" });
+const ai = new GoogleGenAI({ apiKey: "" });
 const rl = readline.createInterface({
     input: process.stdin,
     output: process.stdout
