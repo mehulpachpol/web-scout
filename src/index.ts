@@ -7,7 +7,6 @@ import { promisify } from 'util';
 const execAsync = promisify(exec);
 
 const ai = new GoogleGenAI({ apiKey: "" });
-
 const rl = readline.createInterface({
     input: process.stdin,
     output: process.stdout
@@ -89,6 +88,25 @@ const clickElementTool: FunctionDeclaration = {
     }
 };
 
+const typeTextTool: FunctionDeclaration = {
+    name: 'type_text',
+    description: 'Types text into an input field (like a search bar or login form). Use standard CSS selectors to guess the field, such as "input[name=\'username\']", "input[type=\'password\']", or "input[type=\'email\']".',
+    parametersJsonSchema: {
+        type: 'object',
+        properties: {
+            selector: {
+                type: 'string',
+                description: 'The CSS selector of the input field to type into.'
+            },
+            text: {
+                type: 'string',
+                description: 'The actual text to type.'
+            }
+        },
+        required: ['selector', 'text']
+    }
+};
+
 // MAIN AGENT LOOP
 
 async function main() {
@@ -109,7 +127,7 @@ async function main() {
         config: {
             systemInstruction: "You are a powerful autonomous assistant. You can execute terminal commands AND visually browse the web. If asked to find information, you can use `search_google` or `Maps_to_url`, and then use `get_page_text` to read the contents.",
             tools: [{
-                functionDeclarations: [executeCommandTool, navigateToUrlTool, getPageTextTool, searchWebTool, clickElementTool]
+                functionDeclarations: [executeCommandTool, navigateToUrlTool, getPageTextTool, searchWebTool, clickElementTool, typeTextTool]
             }]
         }
     });
@@ -207,6 +225,25 @@ async function main() {
                         toolResult = `Successfully clicked '${text}'. The page may have updated. Call get_page_text to read the new view.`;
                     } catch (error: any) {
                         toolResult = `Failed to click '${text}'. Error: ${error.message}. The text might not be visible or clickable. Try reading the page text again to find the exact wording.`;
+                    }
+                }
+
+                // TYPE TEXT
+                else if (call.name === 'type_text') {
+                    const selector = call.args.selector as string;
+                    const textToType = call.args.text as string;
+
+                    const displayName = selector.toLowerCase().includes('password') ? '********' : textToType;
+                    console.log(`⌨️  Typing \x1b[33m${displayName}\x1b[0m into: \x1b[36m${selector}\x1b[0m`);
+
+                    try {
+                        await activePage.bringToFront();
+                        const element = activePage.locator(selector).first();
+                        await element.fill(textToType);
+
+                        toolResult = `Successfully typed into '${selector}'. You may need to call click_element to submit the form.`;
+                    } catch (error: any) {
+                        toolResult = `Failed to type into '${selector}'. Error: ${error.message}. Try guessing a different CSS selector like input[type="text"], input[name="email"], input[name="username"], or input[name="password"].`;
                     }
                 }
 
