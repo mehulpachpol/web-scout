@@ -1,6 +1,7 @@
 import { FunctionDeclaration, GoogleGenAI } from '@google/genai';
 import { exec } from 'child_process';
 import * as fs from 'fs/promises';
+import * as os from 'os';
 import * as path from 'path';
 import { Browser, chromium, Page } from 'playwright';
 import * as readline from 'readline';
@@ -13,12 +14,13 @@ if (TRUST_MODE) {
 }
 
 const execAsync = promisify(exec);
-
-const ai = new GoogleGenAI({ apiKey: "" });
+let base64Image: string | null = null;
+const ai = new GoogleGenAI({ apiKey: "AIzaSyCbWB0_L3WfWIAPMdquruyZHs117tp4NEM" });
 const rl = readline.createInterface({
     input: process.stdin,
     output: process.stdout
 });
+const now = new Date().toISOString();
 
 const askQuestion = (query: string): Promise<string> => {
     return new Promise((resolve) => rl.question(query, resolve));
@@ -165,6 +167,38 @@ const readFileTool: FunctionDeclaration = {
     }
 };
 
+const takeScreenshotTool: FunctionDeclaration = {
+    name: 'take_screenshot',
+    description: 'Takes a screenshot of the current browser tab. Use this when you cannot find an element via text, need to understand the visual layout, or encounter a complex UI/icon.',
+    parametersJsonSchema: {
+        type: 'object',
+        properties: {}
+    }
+};
+
+const storeMemoryTool: FunctionDeclaration = {
+    name: 'store_memory',
+    description: 'Saves an important fact, preference, or context about the user or project to long-term memory. Use this proactively when the user reveals how they like things done, their environment setup, or personal details.',
+    parametersJsonSchema: {
+        type: 'object',
+        properties: {
+            fact: { type: 'string', description: 'A clear, concise statement of the fact to remember (e.g., "User prefers yarn over npm" or "Default project path is D:/projects")' }
+        },
+        required: ['fact']
+    }
+};
+
+const searchMemoryTool: FunctionDeclaration = {
+    name: 'search_memory',
+    description: 'Searches the long-term memory file for specific keywords or concepts. Call this if you need to recall past preferences, API keys, or user details.',
+    parametersJsonSchema: {
+        type: 'object',
+        properties: {
+            query: { type: 'string', description: 'The keyword or short phrase to search for in the memory file. Leave empty to retrieve all memories.' }
+        }
+    }
+};
+
 // MAIN AGENT LOOP
 async function main() {
     console.log("🤖 Agent initialized. Type 'exit' to quit.\n");
@@ -215,13 +249,47 @@ async function main() {
         return result;
     }
 
+    // Helper to automatically log the running conversation
+    async function logConversation(role: 'User' | 'Agent', text: string) {
+        if (!text) return;
+        try {
+            const logDir = path.join(os.homedir(), '.web-scout', 'logs');
+            await fs.mkdir(logDir, { recursive: true });
+
+            const date = new Date().toISOString().split('T')[0];
+            const logFile = path.join(logDir, `${date}.md`);
+            const timestamp = new Date().toLocaleTimeString();
+
+            await fs.appendFile(logFile, `**[${timestamp}] ${role}:**\n${text}\n\n`, 'utf-8');
+        } catch (e) {
+            // Fail silently so it doesn't crash the agent
+        }
+    }
+
+    let todaysContext = "";
+    try {
+        const date = new Date().toISOString().split('T')[0];
+        const logFile = path.join(os.homedir(), '.web-scout', 'logs', `${date}.md`);
+        todaysContext = await fs.readFile(logFile, 'utf-8');
+    } catch (e) {
+        todaysContext = "No prior conversation today.";
+    }
+
+    let coreMemory = "";
+    try {
+        const memoryFile = path.join(os.homedir(), '.web-scout', 'MEMORY.md');
+        coreMemory = await fs.readFile(memoryFile, 'utf-8');
+    } catch (e) {
+        coreMemory = "No core memories established yet.";
+    }
+
     const chat = ai.chats.create({
         model: 'gemini-2.5-flash',
         config: {
             systemInstruction: `You are Web-Scout, a highly intelligent, autonomous AI agent with access to the user's local terminal and a visual web browser. 
 
             YOUR CORE DIRECTIVE: Require zero hand-holding. Anticipate obstacles and solve them silently. When a task is fully accomplished, start your final text response with "✅ TASK COMPLETE:" followed by a concise summary.
-
+            System context: The current date and time is ${now}. Use this as the reference point for interpreting relative time expressions like "now", "today", "yesterday", or "tomorrow".
             Depending on the user's request, adopt the following strategies:
 
             ### 1. WEB BROWSING & E-COMMERCE TASKS
@@ -229,6 +297,7 @@ async function main() {
             - **Searching:** Locate search bars using \`type_text\` (guess standard selectors like input[type="text"], input[name="q"], or input[placeholder*="Search"]). Press "Enter" via \`press_key\` to submit.
             - **Product Selection:** Read the search results, evaluate prices and ratings based on the user's constraints, and use \`click_element\` to select the best match. 
             - **Goal Completion:** If the user asks to buy or purchase, your goal is to get the item into the shopping cart. You do not need to process the final payment.
+            - **Visual Interfaces:** If reading the page text isn't enough to understand the layout, or if you need to find an icon (like a cart or magnifying glass), use \`take_screenshot\` to physically look at the screen.
 
             ### 2. LOCAL CLI & SYSTEM TASKS
             - **Safety First:** You are running on the user's actual machine. Do not run destructive commands (like \`rm -rf /\`). 
@@ -240,10 +309,22 @@ async function main() {
             - **Context Gathering:** Before writing code, use \`execute_command\` to read existing files (\`cat filename\`) or view the project structure.
             - **Iterative Testing:** If you write a script for the user, attempt to run it. If it throws an error, read the stderr, fix the code, and try again before telling the user you are done.
 
+            ### 4. LONG-TERM MEMORY
+            - You have access to a persistent \`MEMORY.md\` file.
+            - **Proactive Storage:** If the user tells you a preference, an API key, or a fact about their environment, call \`store_memory\` immediately to save it for future sessions.
+            - **Retrieval:** If you are unsure about the user's environment or past preferences, use \`search_memory\` before asking them.
+
+            ### CORE MEMORY (Persistent Facts):
+            These are the facts you have learned about the user over time. You DO NOT need to search for these, you already know them:
+            ${coreMemory}
+
+            ### RECENT CONTEXT (Earlier Today):
+            Here is the log of what you and the user discussed earlier today. Use this to maintain conversation flow if the user references past tasks or general conversations :
+            ${todaysContext}
             ### ERROR HANDLING (SELF-HEALING)
             If a tool fails (e.g., Playwright cannot find a CSS selector, or a CLI command throws an error), DO NOT apologize immediately to the user. Instead, read the error message, deduce what went wrong, and call the tool again with a different parameter.`,
             tools: [{
-                functionDeclarations: [executeCommandTool, navigateToUrlTool, getPageTextTool, searchWebTool, clickElementTool, typeTextTool, pressKeyTool, writeToFileTool, getProjectTreeTool, readFileTool]
+                functionDeclarations: [executeCommandTool, navigateToUrlTool, getPageTextTool, searchWebTool, clickElementTool, typeTextTool, pressKeyTool, writeToFileTool, getProjectTreeTool, readFileTool, takeScreenshotTool, storeMemoryTool, searchMemoryTool]
             }]
         }
     });
@@ -258,6 +339,7 @@ async function main() {
             break;
         }
         if (!userInput.trim()) continue;
+        await logConversation('User', userInput);
 
         try {
             process.stdout.write('🤖 Agent: ...thinking...');
@@ -430,21 +512,97 @@ async function main() {
                     }
                 }
 
+                // TAKE SCREENSHOT (Vision)
+                else if (call.name === 'take_screenshot') {
+                    const page = await ensureBrowser();
+                    console.log(`📸  Taking a visual screenshot...`);
+                    try {
+                        // We use JPEG to save bandwidth and token limits
+                        const screenshotBuffer = await page.screenshot({ type: 'jpeg', quality: 80 });
+                        base64Image = screenshotBuffer.toString('base64');
+                        toolResult = `Screenshot taken successfully. Look at the attached image to understand the visual layout.`;
+                    } catch (error: any) {
+                        toolResult = `Failed to take screenshot: ${error.message}`;
+                    }
+                }
+
+                //  STORE MEMORY
+                else if (call.name === 'store_memory') {
+                    const fact = call.args.fact as string;
+                    console.log(`🧠  Storing memory: \x1b[35m${fact}\x1b[0m`);
+                    try {
+                        const memoryDir = path.join(os.homedir(), '.web-scout');
+                        const memoryFile = path.join(memoryDir, 'MEMORY.md');
+
+                        await fs.mkdir(memoryDir, { recursive: true });
+
+                        // Append the fact with a timestamp
+                        const date = new Date().toISOString().split('T')[0];
+                        const logEntry = `- [${date}] ${fact}\n`;
+
+                        await fs.appendFile(memoryFile, logEntry, 'utf-8');
+                        toolResult = `Successfully stored memory.`;
+                    } catch (error: any) {
+                        toolResult = `Failed to store memory: ${error.message}`;
+                    }
+                }
+
+                // SEARCH MEMORY
+                else if (call.name === 'search_memory') {
+                    const query = (call.args.query as string || '').toLowerCase();
+                    console.log(`🔎  Searching memory for: \x1b[35m${query || 'ALL'}\x1b[0m`);
+                    try {
+                        const memoryFile = path.join(os.homedir(), '.web-scout', 'MEMORY.md');
+
+                        // Check if memory file exists
+                        try {
+                            await fs.access(memoryFile);
+                        } catch {
+                            toolResult = "Memory file is empty. No memories found.";
+                            continue;
+                        }
+
+                        const content = await fs.readFile(memoryFile, 'utf-8');
+
+                        if (!query) {
+                            toolResult = content || "Memory file is empty.";
+                        } else {
+                            // Basic keyword search (simulating BM25)
+                            const lines = content.split('\n');
+                            const matches = lines.filter(line => line.toLowerCase().includes(query));
+                            toolResult = matches.length > 0
+                                ? `Found ${matches.length} matches:\n${matches.join('\n')}`
+                                : `No memories found matching '${query}'.`;
+                        }
+                    } catch (error: any) {
+                        toolResult = `Failed to search memory: ${error.message}`;
+                    }
+                }
+
                 if (toolResult.length > 20000) {
                     toolResult = toolResult.substring(0, 20000) + "\n...[CONTENT TRUNCATED]...";
                 }
 
                 process.stdout.write(`🤖 Agent: ...processing ${call.name} output...`);
 
-                response = await chat.sendMessage({
-                    message: [{
-                        functionResponse: {
-                            id: call.id,
-                            name: call.name,
-                            response: { result: toolResult }
+                const messageParts: any[] = [{
+                    functionResponse: {
+                        id: call.id,
+                        name: call.name,
+                        response: { result: toolResult }
+                    }
+                }];
+
+                if (base64Image) {
+                    messageParts.push({
+                        inlineData: {
+                            mimeType: "image/jpeg",
+                            data: base64Image
                         }
-                    }]
-                });
+                    });
+                }
+
+                response = await chat.sendMessage({ message: messageParts });
 
                 readline.clearLine(process.stdout, 0);
                 readline.cursorTo(process.stdout, 0);
@@ -453,6 +611,7 @@ async function main() {
             if (response.text) {
                 console.log(`🤖 Agent: ${response.text}`);
                 // speakText(response.text);
+                await logConversation('Agent', response.text);
             }
 
         } catch (error) {
