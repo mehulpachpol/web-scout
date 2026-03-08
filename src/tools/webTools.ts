@@ -102,7 +102,7 @@ export async function executeWebTool(call: any): Promise<{ result: string, base6
                 });
                 break;
             case 'search_web':
-                console.log(`🔍  Searching web for: \x1b[36m${call.args.query}\x1b[0m`);
+                // console.log(`🔍  Searching web for: \x1b[36m${call.args.query}\x1b[0m`);
                 await page.goto(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(call.args.query as string)}`, { waitUntil: 'domcontentloaded' });
                 toolResult = `Search completed. Text: ${await page.evaluate(() => document.body.innerText)}`;
                 break;

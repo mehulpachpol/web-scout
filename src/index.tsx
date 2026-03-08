@@ -110,7 +110,7 @@ async function boot() {
         }
     });
 
-    console.clear(); // Clear the terminal before rendering the UI
+    console.clear();
 
     // Hand over control to the React Ink engine!
     render(<App chatInstance={chat} />);

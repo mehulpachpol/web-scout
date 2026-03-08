@@ -9,7 +9,6 @@ marked.setOptions({
     renderer: new TerminalRenderer({ width: 80, reflowText: true }) as any
 });
 
-// We need an ID for Static to track items efficiently
 type Message = { id: number; role: 'user' | 'agent' | 'system'; text: string };
 
 export const App = ({ chatInstance }: { chatInstance: any }) => {
@@ -31,7 +30,6 @@ export const App = ({ chatInstance }: { chatInstance: any }) => {
         setInput('');
         setIsProcessing(true);
 
-        // Use Date.now() for unique IDs
         setHistory(prev => [...prev, { id: Date.now(), role: 'user', text: userMsg }]);
 
         await runAgentTurn(chatInstance, userMsg, {
@@ -50,7 +48,6 @@ export const App = ({ chatInstance }: { chatInstance: any }) => {
     return (
         <Box flexDirection="column" padding={1}>
 
-            {/* 🛑 THE MAGIC FIX: Wrap history in <Static> */}
             <Static items={history}>
                 {(msg) => (
                     <Box key={msg.id} flexDirection="column" marginBottom={1}>
@@ -64,14 +61,12 @@ export const App = ({ chatInstance }: { chatInstance: any }) => {
                 )}
             </Static>
 
-            {/* Dynamic Status Indicator (Redraws smoothly now!) */}
             {isProcessing && (
                 <Box marginBottom={1}>
                     <Text color="yellow">🌀 {status}</Text>
                 </Box>
             )}
 
-            {/* Fixed Input Area */}
             <Box>
                 <Box marginRight={1}>
                     <Text color="green">❯</Text>
