@@ -5,7 +5,7 @@ import * as path from 'path';
 import { Database, open } from 'sqlite';
 import sqlite3 from 'sqlite3';
 
-const ai = new GoogleGenAI({ apiKey: "AIzaSyD6yHMjOUqxE2tkMa0OQ5XP3Plw1Y0K9NE" });
+const ai = new GoogleGenAI({ apiKey: "" });
 
 async function getDb(): Promise<Database> {
     const dbPath = path.join(os.homedir(), '.web-scout', 'memory.sqlite');
@@ -78,7 +78,7 @@ async function indexFile(db: Database, filePath: string) {
                 );
             }
         }
-        console.log(`\x1b[90m[Indexer: Synced ${chunks.length} chunks from ${path.basename(filePath)}]\x1b[0m`);
+        // console.log(`\x1b[90m[Indexer: Synced ${chunks.length} chunks from ${path.basename(filePath)}]\x1b[0m`);
     } catch (error) {
         console.error(`Error indexing ${filePath}:`, error);
     }

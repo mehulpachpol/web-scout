@@ -1,15 +1,14 @@
 import { GoogleGenAI } from '@google/genai';
 import * as fsSync from 'fs';
 import * as fs from 'fs/promises';
+import { render } from 'ink';
 import * as os from 'os';
 import * as path from 'path';
-import * as readline from 'readline';
 import * as util from 'util';
-import { runReactLoop } from './agent/reactLoop';
 import { syncMemoryIndex } from './memory/indexer';
 import { systemToolDeclarations } from './tools/systemTools';
 import { webToolDeclarations } from './tools/webTools';
-
+import { App } from './ui/App';
 
 const logDir = path.join(os.homedir(), '.web-scout', 'logs');
 fsSync.mkdirSync(logDir, { recursive: true });
@@ -29,10 +28,10 @@ console.log = function (...args) {
     const timestamp = new Date().toISOString();
     fsSync.appendFileSync(systemLogFile, `[${timestamp}] INFO: ${cleanMessage}\n`);
 
-    const isImportant = message.includes('🤖') || message.includes('👋') || message.includes('⚠️');
-    if (isImportant) {
-        originalConsoleLog.apply(console, args);
-    }
+    // const isImportant = message.includes('🤖') || message.includes('👋') || message.includes('⚠️');
+    // if (isImportant) {
+    //     originalConsoleLog.apply(console, args);
+    // }
 };
 
 console.error = function (...args) {
@@ -42,11 +41,10 @@ console.error = function (...args) {
     const timestamp = new Date().toISOString();
     fsSync.appendFileSync(systemLogFile, `[${timestamp}] ERROR: ${cleanMessage}\n`);
 
-    originalConsoleError.apply(console, args);
+    // originalConsoleError.apply(console, args);
 };
 
-const ai = new GoogleGenAI({ apiKey: "AIzaSyD6yHMjOUqxE2tkMa0OQ5XP3Plw1Y0K9NE" });
-const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+const ai = new GoogleGenAI({ apiKey: "" });
 const now = new Date().toISOString();
 
 async function boot() {
@@ -112,12 +110,17 @@ async function boot() {
         }
     });
 
-    // Start the Engine
-    if (process.argv.includes('--trust-mode')) {
-        console.log("⚠️  WARNING: Trust Mode is ENABLED. The agent will execute CLI commands autonomously.\n");
-    }
+    console.clear(); // Clear the terminal before rendering the UI
 
-    await runReactLoop(chat, rl);
+    // Hand over control to the React Ink engine!
+    render(<App chatInstance={chat} />);
+
+    // Start the Engine
+    // if (process.argv.includes('--trust-mode')) {
+    //     console.log("⚠️  WARNING: Trust Mode is ENABLED. The agent will execute CLI commands autonomously.\n");
+    // }
+
+    // await runReactLoop(chat, rl);
 }
 
 boot();

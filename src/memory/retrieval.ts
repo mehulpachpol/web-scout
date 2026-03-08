@@ -4,7 +4,7 @@ import * as path from 'path';
 import { open } from 'sqlite';
 import sqlite3 from 'sqlite3';
 
-const ai = new GoogleGenAI({ apiKey: "AIzaSyD6yHMjOUqxE2tkMa0OQ5XP3Plw1Y0K9NE" });
+const ai = new GoogleGenAI({ apiKey: "" });
 
 function cosineSimilarity(vecA: number[], vecB: number[]): number {
     let dotProduct = 0, normA = 0, normB = 0;

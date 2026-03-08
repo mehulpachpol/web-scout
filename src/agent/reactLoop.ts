@@ -1,9 +1,20 @@
 import * as fs from 'fs/promises';
+import { marked } from 'marked';
+import TerminalRenderer from 'marked-terminal';
+import ora from 'ora';
 import * as os from 'os';
 import * as path from 'path';
 import * as readline from 'readline';
 import { executeSystemTool, systemToolDeclarations } from '../tools/systemTools';
 import { closeBrowser, executeWebTool, webToolDeclarations } from '../tools/webTools';
+
+
+marked.setOptions({
+    renderer: new TerminalRenderer({
+        width: process.stdout.columns || 80,
+        reflowText: true
+    }) as any
+});
 
 async function logConversation(role: 'User' | 'Agent', text: string) {
     if (!text) return;
@@ -110,6 +121,11 @@ export async function runReactLoop(chat: any, rl: readline.Interface) {
         pruneChatHistory(chat);
 
         const userInput = await askQuestion('\n👤 You: ');
+        const spinner = ora({
+            text: 'Initializing...',
+            color: 'cyan',
+            spinner: 'dots'
+        });
 
         if (userInput.trim().toLowerCase() === 'exit') {
             console.log('👋 Cleaning up and exiting...');
@@ -121,18 +137,26 @@ export async function runReactLoop(chat: any, rl: readline.Interface) {
         await logConversation('User', userInput);
 
         try {
-            process.stdout.write('🤖 Agent: ...thinking...');
-            let response = await chat.sendMessage({ message: userInput });
+            spinner.start('Agent is thinking...');
 
-            readline.clearLine(process.stdout, 0);
-            readline.cursorTo(process.stdout, 0);
+            let response = await chat.sendMessage({ message: userInput });
 
             while (response.functionCalls && response.functionCalls.length > 0) {
                 const call: any = response.functionCalls[0];
                 let executionData: { result: string, base64Image?: string } = { result: "" };
 
+                spinner.text = `Executing tool: ${call.name}...`;
+
                 if (systemToolNames.has(call.name)) {
+                    if (call.name === 'execute_command' && !process.argv.includes('--trust-mode')) {
+                        spinner.stop();
+                    }
+
                     executionData = await executeSystemTool(call, askQuestion);
+
+                    if (call.name === 'execute_command' && !process.argv.includes('--trust-mode')) {
+                        spinner.start(`Processing ${call.name} results...`);
+                    }
                 } else if (webToolNames.has(call.name)) {
                     executionData = await executeWebTool(call);
                 } else {
@@ -143,8 +167,6 @@ export async function runReactLoop(chat: any, rl: readline.Interface) {
                     executionData.result = executionData.result.substring(0, 20000) + "\n...[CONTENT TRUNCATED]...";
                 }
 
-                process.stdout.write(`🤖 Agent: ...processing ${call.name} output...`);
-
                 const messageParts: any[] = [{
                     functionResponse: {
                         id: call.id,
@@ -154,26 +176,25 @@ export async function runReactLoop(chat: any, rl: readline.Interface) {
                 }];
 
                 if (executionData.base64Image) {
-                    messageParts.push({
-                        inlineData: { mimeType: "image/jpeg", data: executionData.base64Image }
-                    });
+                    messageParts.push({ inlineData: { mimeType: "image/jpeg", data: executionData.base64Image } });
                 }
 
+                spinner.text = `Analyzing ${call.name} output...`;
                 response = await chat.sendMessage({ message: messageParts });
-
-                readline.clearLine(process.stdout, 0);
-                readline.cursorTo(process.stdout, 0);
             }
 
-            if (response.text) {
-                if (!response.text.includes('NO_REPLY')) {
-                    console.log(`🤖 Agent: ${response.text}`);
-                    await logConversation('Agent', response.text);
-                }
+            spinner.stop();
+
+            if (response.text && !response.text.includes('NO_REPLY')) {
+                const formattedResponse = marked.parse(response.text) as string;
+
+                console.log(`\x1b[36m🤖 Agent:\x1b[0m\n${formattedResponse.trim()}`);
+                await logConversation('Agent', response.text);
             }
 
         } catch (error) {
-            console.error("\n❌ Error:", error);
+            spinner.fail('An error occurred.');
+            console.error("\n\x1b[31m❌ Error:\x1b[0m", error);
         }
     }
 }

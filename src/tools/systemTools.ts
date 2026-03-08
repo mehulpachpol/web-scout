@@ -133,7 +133,7 @@ export async function executeSystemTool(call: any, askQuestion: (q: string) => P
                 break;
 
             case 'store_memory':
-                console.log(`🧠  Storing memory: \x1b[35m${call.args.fact}\x1b[0m`);
+                // console.log(`🧠  Storing memory: \x1b[35m${call.args.fact}\x1b[0m`);
                 const memDir = path.join(os.homedir(), '.web-scout');
                 await fs.mkdir(memDir, { recursive: true });
                 const date = new Date().toISOString().split('T')[0];
