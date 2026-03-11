@@ -1,17 +1,99 @@
-import { FunctionDeclaration } from '@google/genai';
+import OpenAI from 'openai';
 import { Browser, chromium, Page } from 'playwright';
 
 let browser: Browser | null = null;
 let activePage: Page | null = null;
 
-export const webToolDeclarations: FunctionDeclaration[] = [
-    { name: 'navigate_to_url', description: 'Navigates the browser to a specific URL.', parametersJsonSchema: { type: 'object', properties: { url: { type: 'string' } }, required: ['url'] } },
-    { name: 'get_page_text', description: 'Extracts the current webpage as structured Markdown. Links will appear as [Text](url) and buttons as [BUTTON: Text]. Use this to understand page hierarchy and find exact URLs to navigate to.', parametersJsonSchema: { type: 'object', properties: {} } },
-    { name: 'search_web', description: 'Searches the web for a query.', parametersJsonSchema: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'] } },
-    { name: 'click_element', description: 'Clicks a button or link based on its visible text.', parametersJsonSchema: { type: 'object', properties: { text: { type: 'string' } }, required: ['text'] } },
-    { name: 'type_text', description: 'Types text into an input field using CSS selectors.', parametersJsonSchema: { type: 'object', properties: { selector: { type: 'string' }, text: { type: 'string' } }, required: ['selector', 'text'] } },
-    { name: 'press_key', description: 'Presses a keyboard key (e.g., "Enter", "Escape").', parametersJsonSchema: { type: 'object', properties: { key: { type: 'string' } }, required: ['key'] } },
-    { name: 'take_screenshot', description: 'Takes a screenshot of the current browser tab.', parametersJsonSchema: { type: 'object', properties: {} } }
+export const webToolDeclarations: OpenAI.Chat.ChatCompletionTool[] = [
+    {
+        type: 'function',
+        function: {
+            name: 'navigate_to_url',
+            description: 'Navigates the browser to a specific URL.',
+            parameters: {
+                type: 'object',
+                properties: { url: { type: 'string' } },
+                required: ['url'],
+                additionalProperties: false
+            }
+        }
+    },
+    {
+        type: 'function',
+        function: {
+            name: 'get_page_text',
+            description: 'Extracts the current webpage as structured Markdown. Links will appear as [Text](url) and buttons as [BUTTON: Text]. Use this to understand page hierarchy and find exact URLs to navigate to.',
+            parameters: {
+                type: 'object',
+                properties: {},
+                additionalProperties: false
+            }
+        }
+    },
+    {
+        type: 'function',
+        function: {
+            name: 'search_web',
+            description: 'Searches the web for a query.',
+            parameters: {
+                type: 'object',
+                properties: { query: { type: 'string' } },
+                required: ['query'],
+                additionalProperties: false
+            }
+        }
+    },
+    {
+        type: 'function',
+        function: {
+            name: 'click_element',
+            description: 'Clicks a button or link based on its visible text.',
+            parameters: {
+                type: 'object',
+                properties: { text: { type: 'string' } },
+                required: ['text'],
+                additionalProperties: false
+            }
+        }
+    },
+    {
+        type: 'function',
+        function: {
+            name: 'type_text',
+            description: 'Types text into an input field using CSS selectors.',
+            parameters: {
+                type: 'object',
+                properties: { selector: { type: 'string' }, text: { type: 'string' } },
+                required: ['selector', 'text'],
+                additionalProperties: false
+            }
+        }
+    },
+    {
+        type: 'function',
+        function: {
+            name: 'press_key',
+            description: 'Presses a keyboard key (e.g., "Enter", "Escape").',
+            parameters: {
+                type: 'object',
+                properties: { key: { type: 'string' } },
+                required: ['key'],
+                additionalProperties: false
+            }
+        }
+    },
+    {
+        type: 'function',
+        function: {
+            name: 'take_screenshot',
+            description: 'Takes a screenshot of the current browser tab.',
+            parameters: {
+                type: 'object',
+                properties: {},
+                additionalProperties: false
+            }
+        }
+    }
 ];
 
 async function ensureBrowser(): Promise<Page> {
@@ -31,18 +113,18 @@ export async function closeBrowser() {
     if (browser) await browser.close();
 }
 
-export async function executeWebTool(call: any): Promise<{ result: string, base64Image?: string }> {
+export async function executeWebTool(name: string, args: any): Promise<{ result: string, base64Image?: string }> {
     let toolResult = "";
     let base64Image: string | undefined = undefined;
 
     try {
         const page = await ensureBrowser();
 
-        switch (call.name) {
+        switch (name) {
             case 'navigate_to_url':
-                console.log(`🌐  Navigating to: \x1b[36m${call.args.url}\x1b[0m`);
-                await page.goto(call.args.url as string, { waitUntil: 'domcontentloaded' });
-                toolResult = `Mapsd to ${call.args.url}. Call get_page_text to read it.`;
+                console.log(`🌐  Navigating to: \x1b[36m${args.url}\x1b[0m`);
+                await page.goto(args.url as string, { waitUntil: 'domcontentloaded' });
+                toolResult = `Mapsd to ${args.url}. Call get_page_text to read it.`;
                 break;
             case 'get_page_text':
                 console.log(`📄  Reading page structure and converting to Markdown...`);
@@ -102,26 +184,25 @@ export async function executeWebTool(call: any): Promise<{ result: string, base6
                 });
                 break;
             case 'search_web':
-                // console.log(`🔍  Searching web for: \x1b[36m${call.args.query}\x1b[0m`);
-                await page.goto(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(call.args.query as string)}`, { waitUntil: 'domcontentloaded' });
+                await page.goto(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(args.query as string)}`, { waitUntil: 'domcontentloaded' });
                 toolResult = `Search completed. Text: ${await page.evaluate(() => document.body.innerText)}`;
                 break;
             case 'click_element':
-                console.log(`🖱️  Clicking text: \x1b[36m${call.args.text}\x1b[0m`);
-                await page.getByText(call.args.text as string, { exact: false }).first().click();
+                console.log(`🖱️  Clicking text: \x1b[36m${args.text}\x1b[0m`);
+                await page.getByText(args.text as string, { exact: false }).first().click();
                 await page.waitForLoadState('domcontentloaded');
-                toolResult = `Clicked '${call.args.text}'. Screen may have changed.`;
+                toolResult = `Clicked '${args.text}'. Screen may have changed.`;
                 break;
             case 'type_text':
-                console.log(`⌨️  Typing into: \x1b[36m${call.args.selector}\x1b[0m`);
-                await page.locator(call.args.selector as string).first().fill(call.args.text as string);
-                toolResult = `Typed into '${call.args.selector}'.`;
+                console.log(`⌨️  Typing into: \x1b[36m${args.selector}\x1b[0m`);
+                await page.locator(args.selector as string).first().fill(args.text as string);
+                toolResult = `Typed into '${args.selector}'.`;
                 break;
             case 'press_key':
-                console.log(`⌨️  Pressing key: \x1b[35m${call.args.key}\x1b[0m`);
-                await page.keyboard.press(call.args.key as string);
+                console.log(`⌨️  Pressing key: \x1b[35m${args.key}\x1b[0m`);
+                await page.keyboard.press(args.key as string);
                 await page.waitForTimeout(1000);
-                toolResult = `Pressed '${call.args.key}'.`;
+                toolResult = `Pressed '${args.key}'.`;
                 break;
             case 'take_screenshot':
                 console.log(`📸  Taking screenshot...`);
@@ -130,10 +211,10 @@ export async function executeWebTool(call: any): Promise<{ result: string, base6
                 toolResult = `Screenshot taken. Check inlineData.`;
                 break;
             default:
-                toolResult = `Tool ${call.name} not found in webTools.`;
+                toolResult = `Tool ${name} not found in webTools.`;
         }
     } catch (error: any) {
-        toolResult = `Failed to execute ${call.name}: ${error.message}`;
+        toolResult = `Failed to execute ${name}: ${error.message}`;
     }
 
     return { result: toolResult, base64Image };

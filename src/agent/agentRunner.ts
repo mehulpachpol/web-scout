@@ -1,67 +1,96 @@
+import 'dotenv/config';
+import OpenAI from 'openai';
+import { generateRollingSummary } from '../memory/compactor';
 import { executeSystemTool, systemToolDeclarations } from '../tools/systemTools';
 import { executeWebTool, webToolDeclarations } from '../tools/webTools';
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const ALL_TOOLS = [...systemToolDeclarations, ...webToolDeclarations];
 
 export async function runAgentTurn(
-    chat: any,
-    userInput: string,
-    callbacks: {
-        onStatusUpdate: (status: string) => void,
-        onAgentReply: (text: string) => void,
-        onError: (err: any) => void
-    }
+    messages: OpenAI.Chat.ChatCompletionMessageParam[],
+    callbacks: any
 ) {
-    const systemToolNames = new Set(systemToolDeclarations.map(t => t.name));
-    const webToolNames = new Set(webToolDeclarations.map(t => t.name));
+    const systemToolNames = new Set(systemToolDeclarations.map(t => (t as any).function.name));
 
     try {
+        const MAX_MESSAGES = 25;
+        if (messages.length > MAX_MESSAGES) {
+            callbacks.onStatusUpdate('Compacting old memory to save tokens...');
+            let splitIndex = messages.length - 8;
+            while (splitIndex < messages.length && messages[splitIndex].role !== 'user') {
+                splitIndex++;
+            }
+
+            const messagesToCompact = messages.slice(1, splitIndex);
+            const summary = await generateRollingSummary(messagesToCompact);
+
+            messages.splice(1, messagesToCompact.length, {
+                role: 'system',
+                content: `[System Note - Rolling Summary of previous conversation]: ${summary}`
+            });
+        }
+
         callbacks.onStatusUpdate('Agent is thinking...');
-        let response = await chat.sendMessage({ message: userInput });
 
-        while (response.functionCalls && response.functionCalls.length > 0) {
-            const call: any = response.functionCalls[0];
-            let executionData: { result: string, base64Image?: string } = { result: "" };
+        let response = await openai.chat.completions.create({
+            model: 'gpt-4o',
+            messages: messages,
+            tools: ALL_TOOLS,
+        });
 
-            callbacks.onStatusUpdate(`Executing tool: ${call.name}...`);
+        let responseMessage = response.choices[0].message;
 
-            // Note: For the Ink UI, we temporarily bypass the interactive Y/n prompt 
-            // by passing a dummy function that always returns 'y'. We will build a native Ink confirmation modal later!
-            const dummyAsk = async () => 'y';
+        messages.push(responseMessage as OpenAI.Chat.ChatCompletionMessageParam);
 
-            if (systemToolNames.has(call.name)) {
-                executionData = await executeSystemTool(call, dummyAsk);
-            } else if (webToolNames.has(call.name)) {
-                executionData = await executeWebTool(call);
-            } else {
-                executionData.result = `Unknown tool: ${call.name}`;
-            }
+        while (responseMessage.tool_calls && responseMessage.tool_calls.length > 0) {
 
-            if (executionData.result.length > 20000) {
-                executionData.result = executionData.result.substring(0, 20000) + "\n...[CONTENT TRUNCATED]...";
-            }
+            for (const toolCall of responseMessage.tool_calls) {
+                const func = (toolCall as any).function;
 
-            const messageParts: any[] = [{
-                functionResponse: {
-                    id: call.id,
-                    name: call.name,
-                    response: { result: executionData.result }
+                callbacks.onStatusUpdate(`Executing tool: ${func.name}...`);
+
+                const args = JSON.parse(func.arguments);
+                let executionResult = "";
+
+                if (systemToolNames.has(func.name)) {
+                    const callObj = { name: func.name, args: args };
+                    const data = await executeSystemTool(callObj, async () => 'y');
+                    executionResult = data.result;
+                } else {
+                    const data = await executeWebTool(func.name, args);
+                    executionResult = data.result;
                 }
-            }];
 
-            if (executionData.base64Image) {
-                messageParts.push({ inlineData: { mimeType: "image/jpeg", data: executionData.base64Image } });
+                if (executionResult.length > 20000) {
+                    executionResult = executionResult.substring(0, 20000) + "\n...[CONTENT TRUNCATED]...";
+                }
+
+                messages.push({
+                    role: 'tool',
+                    tool_call_id: toolCall.id,
+                    content: executionResult
+                });
             }
 
-            callbacks.onStatusUpdate(`Analyzing ${call.name} output...`);
-            response = await chat.sendMessage({ message: messageParts });
+            callbacks.onStatusUpdate(`Analyzing tool outputs...`);
+
+            response = await openai.chat.completions.create({
+                model: 'gpt-4o',
+                messages: messages,
+                tools: ALL_TOOLS,
+            });
+
+            responseMessage = response.choices[0].message;
+            messages.push(responseMessage as OpenAI.Chat.ChatCompletionMessageParam);
         }
 
         callbacks.onStatusUpdate('Idle');
 
-        if (response.text && !response.text.includes('NO_REPLY')) {
-            callbacks.onAgentReply(response.text);
+        if (responseMessage.content) {
+            callbacks.onAgentReply(responseMessage.content);
         }
 
-    } catch (error) {
+    } catch (error: any) {
         callbacks.onError(error);
         callbacks.onStatusUpdate('Idle');
     }

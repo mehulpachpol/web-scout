@@ -1,6 +1,6 @@
-import { FunctionDeclaration } from '@google/genai';
 import { exec } from 'child_process';
 import * as fs from 'fs/promises';
+import OpenAI from 'openai';
 import * as os from 'os';
 import * as path from 'path';
 import { promisify } from 'util';
@@ -9,63 +9,87 @@ import { performHybridSearch } from '../memory/retrieval';
 const execAsync = promisify(exec);
 const TRUST_MODE = process.argv.includes('--trust-mode');
 
-export const systemToolDeclarations: FunctionDeclaration[] = [
+export const systemToolDeclarations: OpenAI.Chat.ChatCompletionTool[] = [
     {
-        name: 'execute_command',
-        description: 'Executes a CLI command in the terminal. Use for local system tasks.',
-        parametersJsonSchema: {
-            type: 'object',
-            properties: { command: { type: 'string' } },
-            required: ['command']
+        type: 'function',
+        function: {
+            name: 'execute_command',
+            description: 'Executes a CLI command in the terminal. Use for local system tasks.',
+            parameters: {
+                type: 'object',
+                properties: { command: { type: 'string' } },
+                required: ['command'],
+                additionalProperties: false
+            }
         }
     },
     {
-        name: 'write_to_file',
-        description: 'Writes text or code directly to a file. ALWAYS use this instead of CLI "echo" or "out-file" commands when writing multi-line content or code.',
-        parametersJsonSchema: {
-            type: 'object',
-            properties: {
-                filepath: { type: 'string', description: 'The absolute or relative path to the file' },
-                content: { type: 'string', description: 'The full string content to write into the file.' }
-            },
-            required: ['filepath', 'content']
+        type: 'function',
+        function: {
+            name: 'write_to_file',
+            description: 'Writes text or code directly to a file. ALWAYS use this instead of CLI "echo" or "out-file" commands when writing multi-line content or code.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    filepath: { type: 'string', description: 'The absolute or relative path to the file' },
+                    content: { type: 'string', description: 'The full string content to write into the file.' }
+                },
+                required: ['filepath', 'content'],
+                additionalProperties: false
+            }
         }
     },
     {
-        name: 'read_file',
-        description: 'Reads the exact contents of a file from the local disk.',
-        parametersJsonSchema: {
-            type: 'object',
-            properties: { filepath: { type: 'string' } },
-            required: ['filepath']
+        type: 'function',
+        function: {
+            name: 'read_file',
+            description: 'Reads the exact contents of a file from the local disk.',
+            parameters: {
+                type: 'object',
+                properties: { filepath: { type: 'string' } },
+                required: ['filepath'],
+                additionalProperties: false
+            }
         }
     },
     {
-        name: 'get_project_tree',
-        description: 'Returns a visual tree of the files and directories in the project. Automatically ignores node_modules and .git.',
-        parametersJsonSchema: {
-            type: 'object',
-            properties: { dir_path: { type: 'string', description: 'Directory path to map out (default is ".")' } }
+        type: 'function',
+        function: {
+            name: 'get_project_tree',
+            description: 'Returns a visual tree of the files and directories in the project. Automatically ignores node_modules and .git.',
+            parameters: {
+                type: 'object',
+                properties: { dir_path: { type: 'string', description: 'Directory path to map out (default is ".")' } },
+                additionalProperties: false
+            }
         }
     },
     {
-        name: 'store_memory',
-        description: 'Saves an important fact, preference, or context about the user or project to long-term memory.',
-        parametersJsonSchema: {
-            type: 'object',
-            properties: { fact: { type: 'string' } },
-            required: ['fact']
+        type: 'function',
+        function: {
+            name: 'store_memory',
+            description: 'Saves an important fact, preference, or context about the user or project to long-term memory.',
+            parameters: {
+                type: 'object',
+                properties: { fact: { type: 'string' } },
+                required: ['fact'],
+                additionalProperties: false
+            }
         }
     },
     {
-        name: 'memory_search',
-        description: 'Performs a semantic vector search across all past conversations, logs, and long-term memory. Use this to find past facts, preferences, code snippets, or context.',
-        parametersJsonSchema: {
-            type: 'object',
-            properties: {
-                query: { type: 'string', description: 'A natural language query describing what you are trying to remember.' }
-            },
-            required: ['query']
+        type: 'function',
+        function: {
+            name: 'memory_search',
+            description: 'Performs a semantic vector search across all past conversations, logs, and long-term memory. Use this to find past facts, preferences, code snippets, or context.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    query: { type: 'string', description: 'A natural language query describing what you are trying to remember.' }
+                },
+                required: ['query'],
+                additionalProperties: false
+            }
         }
     }
 ];
@@ -133,7 +157,6 @@ export async function executeSystemTool(call: any, askQuestion: (q: string) => P
                 break;
 
             case 'store_memory':
-                // console.log(`🧠  Storing memory: \x1b[35m${call.args.fact}\x1b[0m`);
                 const memDir = path.join(os.homedir(), '.web-scout');
                 await fs.mkdir(memDir, { recursive: true });
                 const date = new Date().toISOString().split('T')[0];

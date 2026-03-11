@@ -1,10 +1,10 @@
-import { GoogleGenAI } from '@google/genai';
+import 'dotenv/config';
+import OpenAI from 'openai';
 import * as os from 'os';
 import * as path from 'path';
 import { open } from 'sqlite';
 import sqlite3 from 'sqlite3';
-
-const ai = new GoogleGenAI({ apiKey: "" });
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 function cosineSimilarity(vecA: number[], vecB: number[]): number {
     let dotProduct = 0, normA = 0, normB = 0;
@@ -31,12 +31,13 @@ export async function performHybridSearch(query: string, topK: number = 3): Prom
     try {
         console.log(`🔎  Vectorizing search query: \x1b[35m${query}\x1b[0m`);
 
-        const response = await ai.models.embedContent({
-            model: 'gemini-embedding-001',
-            contents: query,
+        const response = await openai.embeddings.create({
+            model: 'text-embedding-3-small',
+            input: query,
         });
-        const queryVector = response.embeddings?.[0]?.values || [];
-        if (queryVector.length === 0) return "Failed to generate search vector.";
+
+        const queryVector = response.data[0].embedding;
+        if (!queryVector || queryVector.length === 0) return "Failed to generate search vector.";
 
         const dbPath = path.join(os.homedir(), '.web-scout', 'memory.sqlite');
         const db = await open({ filename: dbPath, driver: sqlite3.Database });

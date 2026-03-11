@@ -1,7 +1,11 @@
-import { Box, Static, Text } from 'ink'; // 👈 IMPORT 'Static' HERE
+import * as fs from 'fs/promises';
+import { Box, Static, Text } from 'ink';
 import TextInput from 'ink-text-input';
 import { marked } from 'marked';
 import TerminalRenderer from 'marked-terminal';
+import OpenAI from 'openai';
+import * as os from 'os';
+import * as path from 'path';
 import { useState } from 'react';
 import { runAgentTurn } from '../agent/agentRunner';
 
@@ -11,7 +15,20 @@ marked.setOptions({
 
 type Message = { id: number; role: 'user' | 'agent' | 'system'; text: string };
 
-export const App = ({ chatInstance }: { chatInstance: any }) => {
+async function appendToDailyLog(role: 'User' | 'Agent', text: string) {
+    const date = new Date().toISOString().split('T')[0];
+    const logPath = path.join(os.homedir(), '.web-scout', 'logs', `${date}.md`);
+    const time = new Date().toLocaleTimeString();
+    const entry = `\n### [${time}] ${role}\n${text}\n`;
+    try {
+        await fs.appendFile(logPath, entry, 'utf-8');
+    } catch (error) {
+    }
+}
+
+export const App = ({ initialMessages }: { initialMessages: OpenAI.Chat.ChatCompletionMessageParam[] }) => {
+    const [apiMessages, setApiMessages] = useState<OpenAI.Chat.ChatCompletionMessageParam[]>(initialMessages);
+
     const [history, setHistory] = useState<Message[]>([
         { id: 0, role: 'system', text: '🤖 Web-Scout initialized. Type "exit" to quit.' }
     ]);
@@ -32,13 +49,22 @@ export const App = ({ chatInstance }: { chatInstance: any }) => {
 
         setHistory(prev => [...prev, { id: Date.now(), role: 'user', text: userMsg }]);
 
-        await runAgentTurn(chatInstance, userMsg, {
-            onStatusUpdate: (newStatus) => setStatus(newStatus),
-            onAgentReply: (text) => {
+        await appendToDailyLog('User', userMsg);
+
+        const currentApiMessages = [
+            ...apiMessages,
+            { role: 'user', content: userMsg } as OpenAI.Chat.ChatCompletionMessageParam
+        ];
+
+        await runAgentTurn(currentApiMessages, {
+            onStatusUpdate: (newStatus: string) => setStatus(newStatus),
+            onAgentReply: async (text: string) => {
                 setHistory(prev => [...prev, { id: Date.now(), role: 'agent', text }]);
+                await appendToDailyLog('Agent', text);
+                setApiMessages([...currentApiMessages]);
                 setIsProcessing(false);
             },
-            onError: (err) => {
+            onError: (err: any) => {
                 setHistory(prev => [...prev, { id: Date.now(), role: 'system', text: `❌ Error: ${err.message}` }]);
                 setIsProcessing(false);
             }

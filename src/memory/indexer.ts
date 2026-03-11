@@ -1,11 +1,11 @@
-import { GoogleGenAI } from '@google/genai';
+import 'dotenv/config';
 import * as fs from 'fs/promises';
+import OpenAI from 'openai';
 import * as os from 'os';
 import * as path from 'path';
 import { Database, open } from 'sqlite';
 import sqlite3 from 'sqlite3';
-
-const ai = new GoogleGenAI({ apiKey: "" });
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 async function getDb(): Promise<Database> {
     const dbPath = path.join(os.homedir(), '.web-scout', 'memory.sqlite');
@@ -46,12 +46,11 @@ function chunkText(text: string, maxWords = 400, overlap = 80): string[] {
 
 async function getEmbedding(text: string): Promise<number[]> {
     try {
-
-        const response = await ai.models.embedContent({
-            model: 'gemini-embedding-001',
-            contents: text,
+        const response = await openai.embeddings.create({
+            model: 'text-embedding-3-small',
+            input: text,
         });
-        return response.embeddings?.[0]?.values || [];
+        return response.data[0].embedding;
     } catch (error) {
         console.error("Failed to generate embedding:", error);
         return [];

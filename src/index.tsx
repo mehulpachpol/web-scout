@@ -1,13 +1,11 @@
-import { GoogleGenAI } from '@google/genai';
 import * as fsSync from 'fs';
 import * as fs from 'fs/promises';
 import { render } from 'ink';
+import OpenAI from 'openai';
 import * as os from 'os';
 import * as path from 'path';
 import * as util from 'util';
 import { syncMemoryIndex } from './memory/indexer';
-import { systemToolDeclarations } from './tools/systemTools';
-import { webToolDeclarations } from './tools/webTools';
 import { App } from './ui/App';
 
 const logDir = path.join(os.homedir(), '.web-scout', 'logs');
@@ -18,33 +16,20 @@ const systemLogFile = path.join(logDir, `${dateStr}-system.log`);
 
 const stripAnsi = (str: string) => str.replace(/\x1b\[[0-9;]*m/g, '');
 
-const originalConsoleLog = console.log;
-const originalConsoleError = console.error;
-
 console.log = function (...args) {
     const message = util.format(...args);
-
     const cleanMessage = stripAnsi(message);
     const timestamp = new Date().toISOString();
     fsSync.appendFileSync(systemLogFile, `[${timestamp}] INFO: ${cleanMessage}\n`);
-
-    // const isImportant = message.includes('🤖') || message.includes('👋') || message.includes('⚠️');
-    // if (isImportant) {
-    //     originalConsoleLog.apply(console, args);
-    // }
 };
 
 console.error = function (...args) {
     const message = util.format(...args);
-
     const cleanMessage = stripAnsi(message);
     const timestamp = new Date().toISOString();
     fsSync.appendFileSync(systemLogFile, `[${timestamp}] ERROR: ${cleanMessage}\n`);
-
-    // originalConsoleError.apply(console, args);
 };
 
-const ai = new GoogleGenAI({ apiKey: "" });
 const now = new Date().toISOString();
 
 async function boot() {
@@ -63,13 +48,7 @@ async function boot() {
         coreMemory = await fs.readFile(path.join(os.homedir(), '.web-scout', 'MEMORY.md'), 'utf-8');
     } catch (e) { }
 
-    const allTools = [...systemToolDeclarations, ...webToolDeclarations];
-
-    // Initialize Agent 
-    const chat = ai.chats.create({
-        model: 'gemini-2.5-flash',
-        config: {
-            systemInstruction: `You are Web-Scout, a highly intelligent, autonomous AI agent with access to the user's local terminal and a visual web browser. 
+    const systemInstruction = `You are Web-Scout, a highly intelligent, autonomous AI agent with access to the user's local terminal and a visual web browser. 
 
             YOUR CORE DIRECTIVE: Require zero hand-holding. Anticipate obstacles and solve them silently. When a task is fully accomplished, start your final text response with "✅ TASK COMPLETE:" followed by a concise summary.
             System context: The current date and time is ${now}. Use this as the reference point for interpreting relative time expressions like "now", "today", "yesterday", or "tomorrow".
@@ -105,22 +84,15 @@ async function boot() {
             Here is the log of what you and the user discussed earlier today. Use this to maintain conversation flow if the user references past tasks or general conversations :
             ${todaysContext}
             ### ERROR HANDLING (SELF-HEALING)
-            If a tool fails (e.g., Playwright cannot find a CSS selector, or a CLI command throws an error), DO NOT apologize immediately to the user. Instead, read the error message, deduce what went wrong, and call the tool again with a different parameter.`,
-            tools: [{ functionDeclarations: allTools }]
-        }
-    });
+            If a tool fails (e.g., Playwright cannot find a CSS selector, or a CLI command throws an error), DO NOT apologize immediately to the user. Instead, read the error message, deduce what went wrong, and call the tool again with a different parameter.`;
+
+    const initialMessages: OpenAI.Chat.ChatCompletionMessageParam[] = [
+        { role: 'system', content: systemInstruction }
+    ];
 
     console.clear();
 
-    // Hand over control to the React Ink engine!
-    render(<App chatInstance={chat} />);
-
-    // Start the Engine
-    // if (process.argv.includes('--trust-mode')) {
-    //     console.log("⚠️  WARNING: Trust Mode is ENABLED. The agent will execute CLI commands autonomously.\n");
-    // }
-
-    // await runReactLoop(chat, rl);
+    render(<App initialMessages={initialMessages} />);
 }
 
 boot();
