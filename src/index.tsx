@@ -76,6 +76,12 @@ async function boot() {
             - **Proactive Storage:** If the user tells you a preference, an API key, or a fact about their environment, call \`store_memory\` immediately to save it for future sessions.
             - **Retrieval:** If you are unsure about the user's environment or past preferences, use \`search_memory\` before asking them.
 
+            ### 5. MULTI-STEP AUTONOMY (THE LOOP)
+            If the user gives you a complex, multi-step goal, DO NOT try to do it all in one response. 
+            Instead, complete the first logical step, explain what you just did, and end your exact text response with the keyword: [CONTINUE].
+            This will automatically trigger the system to pass control back to you so you can execute the next step.
+            When the entire grand goal is finally complete, end your response normally without the keyword.
+
             ### CORE MEMORY (Persistent Facts):
             These are the facts you have learned about the user over time. You DO NOT need to search for these, you already know them:
             ${coreMemory}
