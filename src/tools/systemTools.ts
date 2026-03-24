@@ -114,7 +114,7 @@ export const systemToolDeclarations: OpenAI.Chat.ChatCompletionTool[] = [
         type: 'function',
         function: {
             name: 'schedule_task',
-            description: 'Schedules a specific task to be executed by you autonomously at a future date and time.',
+            description: 'Schedules a specific task to be executed autonomously at a future date and time. Can be a one-time task or recurring.',
             parameters: {
                 type: 'object',
                 properties: {
@@ -125,9 +125,30 @@ export const systemToolDeclarations: OpenAI.Chat.ChatCompletionTool[] = [
                     task_prompt: {
                         type: 'string',
                         description: 'The exact instruction you need to execute when the time arrives.'
+                    },
+                    is_recurring: {
+                        type: 'boolean',
+                        description: 'Set to true if the user wants this task to repeat.'
+                    },
+                    recurrence_interval: {
+                        type: 'string',
+                        description: 'If recurring, specify the interval (e.g., "hourly", "daily", "weekly"). Leave blank if not recurring.'
                     }
                 },
                 required: ['execute_at', 'task_prompt'],
+                additionalProperties: false
+            }
+        }
+    },
+    {
+        type: 'function',
+        function: {
+            name: 'read_pdf',
+            description: 'Reads and extracts text from a PDF document on the local disk.',
+            parameters: {
+                type: 'object',
+                properties: { filepath: { type: 'string', description: 'Absolute or relative path to the .pdf file' } },
+                required: ['filepath'],
                 additionalProperties: false
             }
         }
@@ -267,12 +288,32 @@ export async function executeSystemTool(call: any, askQuestion: (q: string) => P
                 tasks.push({
                     id: Date.now(),
                     executeAt: call.args.execute_at,
-                    prompt: call.args.task_prompt
+                    prompt: call.args.task_prompt,
+                    isRecurring: call.args.is_recurring || false,
+                    recurrenceInterval: call.args.recurrence_interval || null
                 });
 
                 // Save the queue
                 await fs.writeFile(tasksFile, JSON.stringify(tasks, null, 2), 'utf-8');
                 toolResult = `✅ Task successfully scheduled for ${call.args.execute_at}.`;
+                break;
+
+            case 'read_pdf':
+                const pdfPath = call.args.filepath as string;
+                console.log(`📄  Reading PDF: \x1b[36m${pdfPath}\x1b[0m`);
+
+                // const pdfCheck = validatePath(pdfPath);
+                // if (!pdfCheck.allowed) {
+                //     console.log(`\x1b[31m🛡️  SHIELD INTERCEPTED: \x1b[0m${pdfCheck.reason}`);
+                //     return { result: pdfCheck.reason || "Blocked by Shield." };
+                // }
+                const pdfParseModule = await import('pdf-parse');
+                const pdfParse = (pdfParseModule as any).default || pdfParseModule;
+
+                const pdfBuffer = await fs.readFile(pdfPath);
+                const pdfData = await pdfParse(pdfBuffer);
+
+                toolResult = `PDF Contents of ${path.basename(pdfPath)}:\n\n${pdfData.text}`;
                 break;
 
             default:

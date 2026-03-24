@@ -61,9 +61,28 @@ export const App = ({ initialMessages }: { initialMessages: OpenAI.Chat.ChatComp
                 const futureTasks = tasks.filter((t: any) => new Date(t.executeAt) > now);
 
                 if (dueTasks.length > 0) {
-                    await fs.writeFile(tasksFile, JSON.stringify(futureTasks, null, 2), 'utf-8');
-
                     const taskToRun = dueTasks[0];
+                    let updatedTasks = [...futureTasks, ...dueTasks.slice(1)];
+
+                    if (taskToRun.isRecurring && taskToRun.recurrenceInterval) {
+                        const nextTime = new Date(taskToRun.executeAt);
+
+                        if (taskToRun.recurrenceInterval === 'hourly') {
+                            nextTime.setHours(nextTime.getHours() + 1);
+                        } else if (taskToRun.recurrenceInterval === 'daily') {
+                            nextTime.setDate(nextTime.getDate() + 1);
+                        } else if (taskToRun.recurrenceInterval === 'weekly') {
+                            nextTime.setDate(nextTime.getDate() + 7);
+                        }
+
+                        updatedTasks.push({
+                            ...taskToRun,
+                            executeAt: nextTime.toISOString()
+                        });
+                        console.log(`\n🔁 Rescheduled recurring task for ${nextTime.toLocaleString()}`);
+                    }
+
+                    await fs.writeFile(tasksFile, JSON.stringify(updatedTasks, null, 2), 'utf-8');
 
                     setIsProcessing(true);
                     setStatus('Executing scheduled task...');

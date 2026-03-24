@@ -99,7 +99,7 @@ export const webToolDeclarations: OpenAI.Chat.ChatCompletionTool[] = [
 async function ensureBrowser(): Promise<Page> {
     if (!browser) {
         console.log("\n🤖 Agent initializing browser on-demand...");
-        browser = await chromium.launch({ headless: true, channel: 'chrome' });
+        browser = await chromium.launch({ headless: false, channel: 'chrome' });
         activePage = await browser.newPage();
         console.log("🌐 Browser ready!\n");
     } else if (activePage) {
