@@ -4,6 +4,9 @@
   "description": "",
   "main": "index.js",
   "type": "module",
+  "bin": {
+    "scout": "./bin/scout.js"
+  },
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },

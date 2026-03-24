@@ -8,6 +8,7 @@ import * as util from 'util';
 import { syncMemoryIndex } from './memory/indexer';
 import { App } from './ui/App';
 
+
 const logDir = path.join(os.homedir(), '.web-scout', 'logs');
 fsSync.mkdirSync(logDir, { recursive: true });
 
