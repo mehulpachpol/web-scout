@@ -11,6 +11,7 @@ export async function runAgentTurn(
     callbacks: any
 ) {
     const systemToolNames = new Set(systemToolDeclarations.map(t => (t as any).function.name));
+    const askQuestion = typeof callbacks?.askQuestion === 'function' ? callbacks.askQuestion : async () => 'y';
 
     try {
         const MAX_MESSAGES = 25;
@@ -54,7 +55,7 @@ export async function runAgentTurn(
 
                 if (systemToolNames.has(func.name)) {
                     const callObj = { name: func.name, args: args };
-                    const data = await executeSystemTool(callObj, async () => 'y');
+                    const data = await executeSystemTool(callObj, askQuestion);
                     executionResult = data.result;
                 } else {
                     const data = await executeWebTool(func.name, args);

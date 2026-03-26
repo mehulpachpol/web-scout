@@ -37,6 +37,8 @@ export const App = ({ initialMessages }: { initialMessages: OpenAI.Chat.ChatComp
     const [input, setInput] = useState('');
     const [status, setStatus] = useState('Idle');
     const [isProcessing, setIsProcessing] = useState(false);
+    const pendingQuestionResolveRef = useRef<((answer: string) => void) | null>(null);
+    const [pendingQuestion, setPendingQuestion] = useState<string | null>(null);
 
     const apiMessagesRef = useRef(apiMessages);
     const isProcessingRef = useRef(isProcessing);
@@ -54,34 +56,68 @@ export const App = ({ initialMessages }: { initialMessages: OpenAI.Chat.ChatComp
 
             try {
                 const data = await fs.readFile(tasksFile, 'utf-8');
-                const tasks = JSON.parse(data);
+                const parsed = JSON.parse(data);
+                const tasks = Array.isArray(parsed) ? parsed : [];
                 const now = new Date();
 
-                const dueTasks = tasks.filter((t: any) => new Date(t.executeAt) <= now);
-                const futureTasks = tasks.filter((t: any) => new Date(t.executeAt) > now);
+                const toDate = (value: unknown): Date | null => {
+                    const d = new Date(String(value ?? ''));
+                    return Number.isNaN(d.getTime()) ? null : d;
+                };
+
+                const normalizeInterval = (value: unknown): 'hourly' | 'daily' | 'weekly' | 'monthly' | null => {
+                    if (!value) return null;
+                    const v = String(value).trim().toLowerCase();
+                    if (!v) return null;
+                    if (['hourly', 'hour', '1h', 'every hour', 'each hour'].includes(v)) return 'hourly';
+                    if (['daily', 'day', '1d', 'every day', 'each day'].includes(v)) return 'daily';
+                    if (['weekly', 'week', '1w', 'every week', 'each week'].includes(v)) return 'weekly';
+                    if (['monthly', 'month', '1m', 'every month', 'each month'].includes(v)) return 'monthly';
+                    return null;
+                };
+
+                const sortedTasks = tasks
+                    .map((t: any) => ({ ...t, __time: toDate(t.executeAt) }))
+                    .filter((t: any) => t.__time)
+                    .sort((a: any, b: any) => a.__time.getTime() - b.__time.getTime());
+
+                const dueTasks = sortedTasks.filter((t: any) => t.__time <= now);
+                const futureTasks = sortedTasks.filter((t: any) => t.__time > now);
 
                 if (dueTasks.length > 0) {
-                    const taskToRun = dueTasks[0];
-                    let updatedTasks = [...futureTasks, ...dueTasks.slice(1)];
+                    const stripMeta = (t: any) => {
+                        const { __time, ...rest } = t;
+                        return rest;
+                    };
 
-                    if (taskToRun.isRecurring && taskToRun.recurrenceInterval) {
-                        const nextTime = new Date(taskToRun.executeAt);
+                    const taskToRun = stripMeta(dueTasks[0]);
+                    let updatedTasks = [...futureTasks, ...dueTasks.slice(1)].map(stripMeta);
 
-                        if (taskToRun.recurrenceInterval === 'hourly') {
-                            nextTime.setHours(nextTime.getHours() + 1);
-                        } else if (taskToRun.recurrenceInterval === 'daily') {
-                            nextTime.setDate(nextTime.getDate() + 1);
-                        } else if (taskToRun.recurrenceInterval === 'weekly') {
-                            nextTime.setDate(nextTime.getDate() + 7);
-                        }
+                    const interval = normalizeInterval(taskToRun.recurrenceInterval);
+                    if (taskToRun.isRecurring && interval) {
+                        const addIntervalOnce = (d: Date) => {
+                            if (interval === 'hourly') d.setHours(d.getHours() + 1);
+                            else if (interval === 'daily') d.setDate(d.getDate() + 1);
+                            else if (interval === 'weekly') d.setDate(d.getDate() + 7);
+                            else if (interval === 'monthly') d.setMonth(d.getMonth() + 1);
+                        };
+
+                        const nextTime = toDate(taskToRun.executeAt) || new Date(now);
+                        addIntervalOnce(nextTime);
+
+                        let guard = 0;
+                        while (nextTime <= now && guard++ < 500) addIntervalOnce(nextTime);
 
                         updatedTasks.push({
                             ...taskToRun,
+                            isRecurring: true,
+                            recurrenceInterval: interval,
                             executeAt: nextTime.toISOString()
                         });
                         console.log(`\n🔁 Rescheduled recurring task for ${nextTime.toLocaleString()}`);
                     }
 
+                    updatedTasks.sort((a: any, b: any) => new Date(a.executeAt).getTime() - new Date(b.executeAt).getTime());
                     await fs.writeFile(tasksFile, JSON.stringify(updatedTasks, null, 2), 'utf-8');
 
                     setIsProcessing(true);
@@ -106,6 +142,7 @@ export const App = ({ initialMessages }: { initialMessages: OpenAI.Chat.ChatComp
                             setIsProcessing(false);
                             setStatus('Idle');
                         },
+                        askQuestion: async () => 'n',
                         onError: (err: any) => {
                             setHistory(prev => [...prev, { id: Date.now(), role: 'system', text: `❌ Task Error: ${err.message}` }]);
                             setIsProcessing(false);
@@ -121,8 +158,31 @@ export const App = ({ initialMessages }: { initialMessages: OpenAI.Chat.ChatComp
         return () => clearInterval(interval);
     }, []);
 
+    const askQuestion = async (q: string) => {
+        return await new Promise<string>((resolve) => {
+            setPendingQuestion(q);
+            setHistory(prev => [...prev, { id: Date.now(), role: 'system', text: q }]);
+            pendingQuestionResolveRef.current = (answer: string) => {
+                pendingQuestionResolveRef.current = null;
+                setPendingQuestion(null);
+                resolve(answer);
+            };
+        });
+    };
+
     const handleSubmit = async (query: string) => {
-        if (!query.trim() || isProcessing) return;
+        if (!query.trim()) return;
+
+        if (pendingQuestionResolveRef.current) {
+            const resolver = pendingQuestionResolveRef.current;
+            setInput('');
+            setHistory(prev => [...prev, { id: Date.now(), role: 'user', text: query }]);
+            await appendToDailyLog('User', query);
+            resolver(query);
+            return;
+        }
+
+        if (isProcessing) return;
 
         if (query.trim().toLowerCase() === 'exit') {
             process.exit(0);
@@ -180,6 +240,7 @@ export const App = ({ initialMessages }: { initialMessages: OpenAI.Chat.ChatComp
         await runAgentTurn(currentApiMessages, {
             onStatusUpdate: (newStatus: string) => setStatus(newStatus),
             onAgentReply: (text: string) => handleAgentReply(text, currentApiMessages),
+            askQuestion,
             onError: (err: any) => {
                 setHistory(prev => [...prev, { id: Date.now(), role: 'system', text: `❌ Error: ${err.message}` }]);
                 setIsProcessing(false);
@@ -217,7 +278,7 @@ export const App = ({ initialMessages }: { initialMessages: OpenAI.Chat.ChatComp
                     value={input}
                     onChange={setInput}
                     onSubmit={handleSubmit}
-                    placeholder={isProcessing ? "Please wait..." : "Type a message..."}
+                    placeholder={pendingQuestion ? "Approval required (y/n)..." : isProcessing ? "Please wait..." : "Type a message..."}
                 />
             </Box>
         </Box>

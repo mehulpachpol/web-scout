@@ -132,7 +132,8 @@ export const systemToolDeclarations: OpenAI.Chat.ChatCompletionTool[] = [
                     },
                     recurrence_interval: {
                         type: 'string',
-                        description: 'If recurring, specify the interval (e.g., "hourly", "daily", "weekly"). Leave blank if not recurring.'
+                        enum: ['hourly', 'daily', 'weekly', 'monthly'],
+                        description: 'If recurring, specify the interval (hourly, daily, weekly, monthly). Leave blank if not recurring.'
                     }
                 },
                 required: ['execute_at', 'task_prompt'],
@@ -176,6 +177,7 @@ async function generateTree(dir: string, depth = 0, maxDepth = 3): Promise<strin
 
 export async function executeSystemTool(call: any, askQuestion: (q: string) => Promise<string>): Promise<{ result: string }> {
     let toolResult = "";
+    const isYes = (input: string) => input.trim().toLowerCase().startsWith('y');
 
     try {
         switch (call.name) {
@@ -208,9 +210,19 @@ export async function executeSystemTool(call: any, askQuestion: (q: string) => P
             case 'write_to_file':
                 const writePath = call.args.filepath as string;
                 const writeCheck = validatePath(writePath);
-                if (!writeCheck.allowed) {
+                let allowWrite = writeCheck.allowed;
+                if (!allowWrite) {
                     console.log(`\x1b[31m🛡️  SHIELD INTERCEPTED: \x1b[0m${writeCheck.reason}`);
-                    return { result: writeCheck.reason || "Blocked by Shield." };
+                    if (TRUST_MODE) {
+                        allowWrite = true;
+                    } else {
+                        const confirm = await askQuestion(`${writeCheck.reason}\nAllow write to '${writePath}'? [y/N]: `);
+                        if (!isYes(confirm)) {
+                            toolResult = writeCheck.reason || "Blocked by Shield.";
+                            break;
+                        }
+                        allowWrite = true;
+                    }
                 }
                 console.log(`💾  Writing content to: \x1b[32m${writePath}\x1b[0m`);
                 await fs.mkdir(path.dirname(writePath), { recursive: true });
@@ -222,14 +234,36 @@ export async function executeSystemTool(call: any, askQuestion: (q: string) => P
                 const readPath = call.args.filepath as string;
                 console.log(`📖  Reading file: \x1b[36m${call.args.filepath}\x1b[0m`);
                 const readCheck = validatePath(readPath);
-                // if (!readCheck.allowed) {open
-                //     return { result: readCheck.reason || "Blocked by Shield." };
-                // }
-                toolResult = await fs.readFile(call.args.filepath as string, 'utf-8');
+                let allowRead = readCheck.allowed;
+                if (!allowRead) {
+                    console.log(`\x1b[31mðŸ›¡ï¸  SHIELD INTERCEPTED: \x1b[0m${readCheck.reason}`);
+                    if (TRUST_MODE) {
+                        allowRead = true;
+                    } else {
+                        const confirm = await askQuestion(`${readCheck.reason}\nAllow read from '${readPath}'? [y/N]: `);
+                        if (!isYes(confirm)) {
+                            toolResult = readCheck.reason || "Blocked by Shield.";
+                            break;
+                        }
+                        allowRead = true;
+                    }
+                }
+                toolResult = await fs.readFile(readPath, 'utf-8');
                 break;
 
             case 'get_project_tree':
                 const dirPath = (call.args.dir_path as string) || '.';
+                const treeCheck = validatePath(dirPath);
+                if (!treeCheck.allowed) {
+                    console.log(`\x1b[31mðŸ›¡ï¸  SHIELD INTERCEPTED: \x1b[0m${treeCheck.reason}`);
+                    if (!TRUST_MODE) {
+                        const confirm = await askQuestion(`${treeCheck.reason}\nAllow reading directory tree '${dirPath}'? [y/N]: `);
+                        if (!isYes(confirm)) {
+                            toolResult = treeCheck.reason || "Blocked by Shield.";
+                            break;
+                        }
+                    }
+                }
                 console.log(`🌳  Mapping project tree for: \x1b[36m${dirPath}\x1b[0m`);
                 toolResult = `Project structure (Max depth 3):\n${await generateTree(dirPath)}`;
                 break;
@@ -276,30 +310,65 @@ export async function executeSystemTool(call: any, askQuestion: (q: string) => P
 
             case 'schedule_task':
                 const tasksFile = path.join(os.homedir(), '.web-scout', 'pending_tasks.json');
-                let tasks = [];
+                await fs.mkdir(path.dirname(tasksFile), { recursive: true });
+                let tasks: any[] = [];
 
                 // Read existing queue
                 try {
                     const data = await fs.readFile(tasksFile, 'utf-8');
-                    tasks = JSON.parse(data);
+                    const parsed = JSON.parse(data);
+                    tasks = Array.isArray(parsed) ? parsed : [];
                 } catch (e) { }
+
+                const executeAtRaw = String(call.args.execute_at);
+                const executeAtDate = new Date(executeAtRaw);
+                if (Number.isNaN(executeAtDate.getTime())) {
+                    toolResult = `Invalid execute_at timestamp '${executeAtRaw}'. Please pass an ISO 8601 date/time (e.g. 2026-03-25T14:30:00.000Z).`;
+                    break;
+                }
+
+                const normalizeInterval = (value: unknown): string | null => {
+                    if (!value) return null;
+                    const v = String(value).trim().toLowerCase();
+                    if (!v) return null;
+                    if (['hourly', 'hour', '1h', 'every hour', 'each hour'].includes(v)) return 'hourly';
+                    if (['daily', 'day', '1d', 'every day', 'each day'].includes(v)) return 'daily';
+                    if (['weekly', 'week', '1w', 'every week', 'each week'].includes(v)) return 'weekly';
+                    if (['monthly', 'month', '1m', 'every month', 'each month'].includes(v)) return 'monthly';
+                    return null;
+                };
+
+                const recurrenceInterval = normalizeInterval(call.args.recurrence_interval);
+                const isRecurring = Boolean(call.args.is_recurring) || Boolean(recurrenceInterval);
 
                 // Add the new task
                 tasks.push({
                     id: Date.now(),
-                    executeAt: call.args.execute_at,
+                    executeAt: executeAtDate.toISOString(),
                     prompt: call.args.task_prompt,
-                    isRecurring: call.args.is_recurring || false,
-                    recurrenceInterval: call.args.recurrence_interval || null
+                    isRecurring,
+                    recurrenceInterval: isRecurring ? recurrenceInterval : null
                 });
 
                 // Save the queue
+                tasks.sort((a: any, b: any) => new Date(a.executeAt).getTime() - new Date(b.executeAt).getTime());
                 await fs.writeFile(tasksFile, JSON.stringify(tasks, null, 2), 'utf-8');
-                toolResult = `✅ Task successfully scheduled for ${call.args.execute_at}.`;
+                toolResult = `✅ Task successfully scheduled for ${executeAtDate.toISOString()}.`;
                 break;
 
             case 'read_pdf':
                 const pdfPath = call.args.filepath as string;
+                const pdfCheck = validatePath(pdfPath);
+                if (!pdfCheck.allowed) {
+                    console.log(`\x1b[31mðŸ›¡ï¸  SHIELD INTERCEPTED: \x1b[0m${pdfCheck.reason}`);
+                    if (!TRUST_MODE) {
+                        const confirm = await askQuestion(`${pdfCheck.reason}\nAllow read from PDF '${pdfPath}'? [y/N]: `);
+                        if (!isYes(confirm)) {
+                            toolResult = pdfCheck.reason || "Blocked by Shield.";
+                            break;
+                        }
+                    }
+                }
                 console.log(`📄  Reading PDF: \x1b[36m${pdfPath}\x1b[0m`);
 
                 // const pdfCheck = validatePath(pdfPath);
@@ -307,11 +376,10 @@ export async function executeSystemTool(call: any, askQuestion: (q: string) => P
                 //     console.log(`\x1b[31m🛡️  SHIELD INTERCEPTED: \x1b[0m${pdfCheck.reason}`);
                 //     return { result: pdfCheck.reason || "Blocked by Shield." };
                 // }
-                const pdfParseModule = await import('pdf-parse');
-                const pdfParse = (pdfParseModule as any).default || pdfParseModule;
-
                 const pdfBuffer = await fs.readFile(pdfPath);
-                const pdfData = await pdfParse(pdfBuffer);
+                const { PDFParse } = await import('pdf-parse');
+                const parser = new PDFParse({ data: pdfBuffer as any });
+                const pdfData = await parser.getText();
 
                 toolResult = `PDF Contents of ${path.basename(pdfPath)}:\n\n${pdfData.text}`;
                 break;
