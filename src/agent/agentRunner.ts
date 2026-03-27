@@ -12,6 +12,23 @@ export async function runAgentTurn(
 ) {
     const systemToolNames = new Set(systemToolDeclarations.map(t => (t as any).function.name));
     const askQuestion = typeof callbacks?.askQuestion === 'function' ? callbacks.askQuestion : async () => 'y';
+    const abortSignal: AbortSignal | undefined = callbacks?.abortSignal;
+    const executionOptions = callbacks?.executionOptions || {};
+    const requestOptions = abortSignal ? ({ signal: abortSignal } as any) : undefined;
+    const throwIfAborted = () => {
+        if (abortSignal?.aborted) {
+            throw new Error('Aborted by user.');
+        }
+    };
+    const looksLikeLinkDump = (text: string) => {
+        const urls = text.match(/https?:\/\/\S+/g) || [];
+        const nonUrl = text.replace(/https?:\/\/\S+/g, ' ').replace(/\s+/g, ' ').trim();
+        const nonUrlWords = nonUrl ? nonUrl.split(' ').length : 0;
+        const hasSourcesSection = /(^|\n)\s*(sources|references)\s*:/i.test(text);
+        const isMostlyLinks = urls.length >= 3 && nonUrlWords < 120;
+        const isSourcesOnly = hasSourcesSection && urls.length >= 2 && nonUrlWords < 180;
+        return isMostlyLinks || isSourcesOnly;
+    };
 
     try {
         const MAX_MESSAGES = 25;
@@ -33,11 +50,12 @@ export async function runAgentTurn(
 
         callbacks.onStatusUpdate('Agent is thinking...');
 
+        throwIfAborted();
         let response = await openai.chat.completions.create({
             model: 'gpt-4o',
             messages: messages,
             tools: ALL_TOOLS,
-        });
+        }, requestOptions);
 
         let responseMessage = response.choices[0].message;
 
@@ -55,15 +73,24 @@ export async function runAgentTurn(
 
                 if (systemToolNames.has(func.name)) {
                     const callObj = { name: func.name, args: args };
-                    const data = await executeSystemTool(callObj, askQuestion);
+                    throwIfAborted();
+                    const data = await executeSystemTool(callObj, askQuestion, executionOptions);
                     executionResult = data.result;
                 } else {
-                    const data = await executeWebTool(func.name, args);
+                    throwIfAborted();
+                    const data = await executeWebTool(func.name, args, abortSignal);
                     executionResult = data.result;
                 }
 
                 if (executionResult.length > 20000) {
                     executionResult = executionResult.substring(0, 20000) + "\n...[CONTENT TRUNCATED]...";
+                }
+
+                if (typeof callbacks?.onToolOutput === 'function') {
+                    try {
+                        callbacks.onToolOutput(func.name, args, executionResult);
+                    } catch {
+                    }
                 }
 
                 messages.push({
@@ -75,21 +102,49 @@ export async function runAgentTurn(
 
             callbacks.onStatusUpdate(`Analyzing tool outputs...`);
 
+            throwIfAborted();
             response = await openai.chat.completions.create({
                 model: 'gpt-4o',
                 messages: messages,
                 tools: ALL_TOOLS,
-            });
+            }, requestOptions);
 
             responseMessage = response.choices[0].message;
             messages.push(responseMessage as OpenAI.Chat.ChatCompletionMessageParam);
         }
 
-        callbacks.onStatusUpdate('Idle');
-
         if (responseMessage.content) {
-            callbacks.onAgentReply(responseMessage.content);
+            let finalContent = responseMessage.content;
+
+            // If the model returns "just links" for a research question, do one extra
+            // internal pass to force a complete write-up using the gathered tool outputs.
+            if (looksLikeLinkDump(finalContent)) {
+                callbacks.onStatusUpdate('Finalizing answer...');
+                throwIfAborted();
+                const finalize = await openai.chat.completions.create({
+                    model: 'gpt-4o',
+                    messages: [
+                        ...messages,
+                        {
+                            role: 'system',
+                            content:
+                                 'FINALIZATION: Rewrite the answer as a complete, user-facing write-up. Do NOT output only links. Use the tool outputs above as sources, include a clear comparison/summary and a conclusion. Keep it concise and actionable.'
+                                 + ' If sources are available, cite them inline as [1], [2], etc and include a short Sources list at the end.'
+                         }
+                    ]
+                }, requestOptions);
+
+                const rewritten = finalize.choices[0].message.content;
+                if (rewritten && rewritten.trim()) {
+                    finalContent = rewritten;
+                    responseMessage.content = rewritten;
+                }
+            }
+
+            callbacks.onAgentReply(finalContent);
         }
+
+        callbacks.onStatusUpdate('Idle');
 
     } catch (error: any) {
         callbacks.onError(error);

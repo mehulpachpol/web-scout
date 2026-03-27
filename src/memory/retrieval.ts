@@ -2,8 +2,7 @@ import 'dotenv/config';
 import OpenAI from 'openai';
 import * as os from 'os';
 import * as path from 'path';
-import { open } from 'sqlite';
-import sqlite3 from 'sqlite3';
+import { openMemoryDb } from './db';
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 function cosineSimilarity(vecA: number[], vecB: number[]): number {
@@ -29,8 +28,6 @@ function calculateKeywordScore(query: string, text: string): number {
 
 export async function performHybridSearch(query: string, topK: number = 3): Promise<string> {
     try {
-        console.log(`🔎  Vectorizing search query: \x1b[35m${query}\x1b[0m`);
-
         const response = await openai.embeddings.create({
             model: 'text-embedding-3-small',
             input: query,
@@ -39,9 +36,8 @@ export async function performHybridSearch(query: string, topK: number = 3): Prom
         const queryVector = response.data[0].embedding;
         if (!queryVector || queryVector.length === 0) return "Failed to generate search vector.";
 
-        const dbPath = path.join(os.homedir(), '.web-scout', 'memory.sqlite');
-        const db = await open({ filename: dbPath, driver: sqlite3.Database });
-        const rows = await db.all(`SELECT file_path, chunk_index, text_content, embedding FROM memory_chunks`);
+        const db = await openMemoryDb();
+        const rows = await db.all(`SELECT file_path, chunk_index, text_content, embedding, source_type, page_number, source_title, source_url FROM memory_chunks`);
         await db.close();
 
         if (rows.length === 0) return "Memory database is empty.";
@@ -60,7 +56,11 @@ export async function performHybridSearch(query: string, topK: number = 3): Prom
         let resultText = `Found ${topResults.length} highly relevant memory snippets:\n\n`;
         topResults.forEach((res, i) => {
             resultText += `--- Snippet ${i + 1} [Relevance Score: ${res.score.toFixed(2)}] ---\n`;
-            resultText += `Source File: ${res.file_path} (Chunk ${res.chunk_index})\n`;
+            const title = res.source_title || path.basename(String(res.file_path || ''));
+            const page = res.page_number ? ` (page ${res.page_number})` : '';
+            const kind = res.source_type ? `\nSource Type: ${res.source_type}` : '';
+            const url = res.source_url ? `\nSource URL: ${res.source_url}` : '';
+            resultText += `Source: ${title}${page}\nSource File: ${res.file_path} (Chunk ${res.chunk_index})${kind}${url}\n`;
             resultText += `Content:\n${res.text_content}\n\n`;
         });
 

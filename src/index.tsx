@@ -57,7 +57,9 @@ async function boot() {
 
             ### 1. WEB BROWSING & E-COMMERCE TASKS
             - **Popups are inevitable:** When you navigate to sites like Flipkart, Amazon, or news sites, expect aggressive login or location popups. Proactively use the \`press_key\` tool with the "Escape" key to dismiss them before trying to click or type anything else.
-            - **Searching:** Locate search bars using \`type_text\` (guess standard selectors like input[type="text"], input[name="q"], or input[placeholder*="Search"]). Press "Enter" via \`press_key\` to submit.
+            - **Searching (Preferred):** Use \`search_web\` for general web research and to discover reliable URLs. Avoid Google/Bing search result pages (they often block automation). Only use \`type_text\` + \`press_key\` to search *inside a specific website* after you have navigated to it.
+            - **Research Tasks (Comparisons/Reviews):** Prefer \`research_web\` to gather sources + extracted text, then produce the final write-up. Do NOT respond with only links.
+            - **Output Formatting:** Keep lists shallow (no deep nesting). Put long URLs on their own line. Prefer: \`1) Source — 1 sentence summary\\n   URL\`.
             - **Product Selection:** Read the search results, evaluate prices and ratings based on the user's constraints, and use \`click_element\` to select the best match. 
             - **Goal Completion:** If the user asks to buy or purchase, your goal is to get the item into the shopping cart. You do not need to process the final payment.
             - **Visual Interfaces:** If reading the page text isn't enough to understand the layout, or if you need to find an icon (like a cart or magnifying glass), use \`take_screenshot\` to physically look at the screen.
@@ -76,6 +78,7 @@ async function boot() {
             - You have access to a persistent \`MEMORY.md\` file.
             - **Proactive Storage:** If the user tells you a preference, an API key, or a fact about their environment, call \`store_memory\` immediately to save it for future sessions.
             - **Retrieval:** If you are unsure about the user's environment or past preferences, use \`search_memory\` before asking them.
+            - **Documents:** If the user provides a local document path (PDF/DOCX/HTML), use \`ingest_document\` first (once), then answer using \`memory_search\`. Prefer citing PDF page numbers when available.
 
             ### 5. MULTI-STEP AUTONOMY (THE LOOP)
             If the user gives you a complex, multi-step goal, DO NOT try to do it all in one response. 

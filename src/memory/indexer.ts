@@ -3,30 +3,12 @@ import * as fs from 'fs/promises';
 import OpenAI from 'openai';
 import * as os from 'os';
 import * as path from 'path';
-import { Database, open } from 'sqlite';
-import sqlite3 from 'sqlite3';
+import { Database } from 'sqlite';
+import { openMemoryDb } from './db';
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 async function getDb(): Promise<Database> {
-    const dbPath = path.join(os.homedir(), '.web-scout', 'memory.sqlite');
-    const db = await open({
-        filename: dbPath,
-        driver: sqlite3.Database
-    });
-
-    await db.exec(`
-        CREATE TABLE IF NOT EXISTS memory_chunks (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            file_path TEXT NOT NULL,
-            chunk_index INTEGER NOT NULL,
-            text_content TEXT NOT NULL,
-            embedding JSON NOT NULL,
-            last_updated DATETIME DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE(file_path, chunk_index)
-        );
-    `);
-
-    return db;
+    return await openMemoryDb();
 }
 
 function chunkText(text: string, maxWords = 400, overlap = 80): string[] {
@@ -72,8 +54,8 @@ async function indexFile(db: Database, filePath: string) {
 
             if (vector.length > 0) {
                 await db.run(
-                    `INSERT INTO memory_chunks (file_path, chunk_index, text_content, embedding) VALUES (?, ?, ?, ?)`,
-                    [filePath, i, chunkTextContent, JSON.stringify(vector)]
+                    `INSERT INTO memory_chunks (file_path, chunk_index, text_content, embedding, source_type, source_title) VALUES (?, ?, ?, ?, ?, ?)`,
+                    [filePath, i, chunkTextContent, JSON.stringify(vector), 'markdown', path.basename(filePath)]
                 );
             }
         }
