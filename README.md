@@ -1,52 +1,166 @@
-# 🌐 Web-Scout: Autonomous CLI & Web Agent
+# Web-Scout (agentic-me-bot)
 
+A local-first personal agent that can:
 
+- chat in a terminal UI (Ink + React)
+- browse the web (Playwright + hardened web search + research bundling)
+- run local tools safely (Shield + persistent permissions + audit log)
+- schedule recurring tasks (cron/interval, missed-run policies, per-task timezone)
+- ingest documents (PDF/DOCX/HTML/MD/TXT → chunks → embeddings) and answer with citations (PDF page numbers when available)
 
-Web-Scout is a fully autonomous, TypeScript-based AI agent powered by **Google Gemini 2.5 Flash**. It bridges the gap between your local terminal and the internet. Built entirely from scratch without heavy frameworks, it uses a custom **ReAct (Reason + Act)** loop to execute terminal commands, visually browse the web, and solve complex, multi-step prompts.
+The default LLM client in this repo is OpenAI (`OPENAI_API_KEY`) and the tool loop is implemented as a ReAct-style “tool-call → observe → continue” cycle.
 
+---
 
+## Key Features
 
-## ✨ Key Features
+### Safety + Permissions (Shield)
+- Blocks unsafe commands and paths by default (`src/security/shield.ts`).
+- If Shield blocks a path/tool, the UI asks you (human-in-the-loop) instead of hard-blocking.
+- Supports persistent rules (“always allow this folder/tool”, “always deny…”) + audit log:
+  - `~/.web-scout/permissions.json`
+  - `~/.web-scout/audit.jsonl`
 
+### Web Tools (hardened)
+- `search_web`: reliable web search (no Google CAPTCHA dependency).
+- `research_web`: search + fetch top sources + return extracted text for better summaries/comparisons.
+- Multi-provider fallback + caching + rate-limit backoff + telemetry:
+  - cache: `~/.web-scout/cache/web/`
+  - telemetry: `~/.web-scout/telemetry/web.jsonl`
 
+### Scheduler + `/tasks` UI
+- Cron support (5-field: `m h dom mon dow`), interval schedules, one-time schedules.
+- Missed-run policies: `skip | catch_up_once | catch_up_all`.
+- Local commands to manage tasks without the LLM:
+  - `/tasks list|show|enable|disable|delete|update`
 
-* **💻 Terminal Control:** Executes local shell commands to read files, manage directories, or check system states.
+### Document Ingestion + Citations
+- `ingest_document` tool indexes documents into `~/.web-scout/memory.sqlite` with embeddings.
+- `memory_search` returns the most relevant chunks and includes metadata:
+  - source title / URL
+  - PDF page number (when ingestion extracted per-page text)
 
-* **🛡️ Human-in-the-Loop (HITL):** Built-in security pauses before executing any CLI command, ensuring the agent doesn't accidentally run destructive scripts.
+### UX
+- Cleaner rendering (labels align correctly; markdown is rendered in terminal).
+- Optional tool-call trace cards: `/trace on`
+- Stop/cancel current run: `/stop`
+- Dry-run mode (tools don’t execute side effects): `/dryrun on`
 
-* **🌍 Visual Web Browsing:** Integrates **Playwright** to open a real browser instance, navigate URLs, search the web (bypassing CAPTCHAs via DuckDuckGo), and click specific elements.
+---
 
-* **🧠 Self-Healing:** If a CLI command fails or an HTML element is missing, the agent reads the error message and automatically formulates a new plan.
+## Architecture
 
-* **🗣️ Native Voice (TTS):** Uses your operating system's native text-to-speech engine (`say`, `PowerShell`, or `espeak`) to speak its thought process and answers out loud.
+```mermaid
+flowchart TB
+  UI[Ink UI\nsrc/ui/App.tsx] -->|messages| Runner[Agent Loop\nsrc/agent/agentRunner.ts]
+  Runner -->|chat.completions| LLM[LLM Provider\nOpenAI SDK]
+  Runner -->|tool calls| Tools[Tools]
 
+  Tools --> Sys[System Tools\nsrc/tools/systemTools.ts]
+  Tools --> Web[Web Tools\nsrc/tools/webTools.ts]
 
+  Sys --> Shield[Shield\nsrc/security/shield.ts]
+  Sys --> Perms[Permissions + Audit\nsrc/security/permissions.ts]
+  Sys --> FS[Filesystem / OS]
+  Sys --> Sched[Scheduler Store\nsrc/scheduler/tasks.ts]
+  Sys --> Ingest[Ingestion Pipeline\nsrc/ingest/pipeline.ts]
+  Ingest --> DB[(SQLite)\n~/.web-scout/memory.sqlite]
 
-## 🏗️ How It Works (The ReAct Loop)
+  Web --> HTTP[HTTP fetch + extract]
+  Web --> PW[Playwright Browser]
+  Web --> Cache[Cache + Telemetry\n~/.web-scout/cache/web\n~/.web-scout/telemetry/web.jsonl]
 
+  UI -->|poll| Sched
+  Sched -->|wakeups| Runner
+```
 
+---
 
-Instead of immediately generating a text response, Web-Scout enters a reasoning loop:
-
-1. **Reason:** The LLM analyzes your prompt and decides which tool it needs.
-
-2. **Act:** It outputs a JSON function call (e.g., `execute_command` or `search_web`).
-
-3. **Observe:** The TypeScript controller intercepts the call, runs the physical action (via Playwright or Node `child_process`), and feeds the result back to the LLM.
-
-4. **Repeat:** The agent continues this cycle until it has gathered enough information to fulfill your original request.
-
-
-
-## 🚀 Getting Started
-
-
+## Getting Started
 
 ### Prerequisites
+- Node.js 18+
+- An OpenAI API key (set `OPENAI_API_KEY`)
 
-* **Node.js** (v18+ recommended)
+### Install
 
-* A **Google Gemini API Key** (Free tier works perfectly)
+If PowerShell blocks `npm` scripts on your machine, run install from `cmd.exe`:
 
+```bat
+cmd /c "npm install"
+```
 
+### Configure
+
+Create `.env`:
+
+```env
+OPENAI_API_KEY=your_key_here
+```
+
+Optional:
+- `WEBTOOLS_HEADLESS=false` to show the browser window
+- `WEBTOOLS_CHANNEL=chrome` to use installed Chrome
+- `SCOUT_DEBUG=1` or `--debug` to show internal browser/tool logs
+
+### Run
+
+```bat
+node bin/scout.js
+```
+
+Common flags:
+- `--trust-mode` (auto-approves prompts; not recommended for daily use)
+- `--debug` (verbose web tool logs)
+
+---
+
+## Built-in UI Commands
+- `exit` — quit
+- `/stop` — cancel the current agent run
+- `/trace on|off` — show/hide tool-call cards
+- `/dryrun on|off` — run tools in dry-run mode (no side effects)
+
+### `/tasks`
+- `/tasks list`
+- `/tasks show <id>`
+- `/tasks disable <id>` / `/tasks enable <id>`
+- `/tasks delete <id>`
+- `/tasks update <id> <json>` (advanced)
+
+Example:
+
+```text
+/tasks update 1712830000000 {"missedRunPolicy":"skip"}
+```
+
+---
+
+## Data Storage (on your machine)
+
+All state is stored under `~/.web-scout/`:
+
+- `logs/` — daily chat logs (markdown)
+- `MEMORY.md` — user “core memory”
+- `pending_tasks.json` — scheduler tasks
+- `permissions.json` — persistent permission rules
+- `audit.jsonl` — allow/deny audit log
+- `cache/web/` — web cache
+- `telemetry/web.jsonl` — web backoff/rate-limit telemetry
+- `memory.sqlite` — embeddings + ingested documents
+
+---
+
+## Tooling Notes
+
+- Web searching: prefer `search_web` / `research_web` instead of navigating to Google result pages (often blocks automation).
+- Research output quality: the agent loop includes a finalization pass to prevent “link dumps” and produce an actual write-up.
+- PDFs:
+  - `read_pdf` is a direct extractor.
+  - `ingest_document` is for long-term Q&A (recommended for large PDFs).
+
+---
+
+## Docs
+- Feature design/implementation notes: `docs/FEATURES_IMPLEMENTATION_GUIDE.md`
 
