@@ -8,13 +8,14 @@ A local-first personal agent that can:
 - schedule recurring tasks (cron/interval, missed-run policies, per-task timezone)
 - ingest documents (PDF/DOCX/HTML/MD/TXT → chunks → embeddings) and answer with citations (PDF page numbers when available)
 
-The default LLM client in this repo is OpenAI (`OPENAI_API_KEY`) and the tool loop is implemented as a ReAct-style “tool-call → observe → continue” cycle.
+The default LLM client in this repo is OpenAI and the tool loop is implemented as a ReAct-style “tool-call → observe → continue” cycle.
 
 ---
 
 ## Key Features
 
 ### Safety + Permissions (Shield)
+
 - Blocks unsafe commands and paths by default (`src/security/shield.ts`).
 - If Shield blocks a path/tool, the UI asks you (human-in-the-loop) instead of hard-blocking.
 - Supports persistent rules (“always allow this folder/tool”, “always deny…”) + audit log:
@@ -22,6 +23,7 @@ The default LLM client in this repo is OpenAI (`OPENAI_API_KEY`) and the tool lo
   - `~/.web-scout/audit.jsonl`
 
 ### Web Tools (hardened)
+
 - `search_web`: reliable web search (no Google CAPTCHA dependency).
 - `research_web`: search + fetch top sources + return extracted text for better summaries/comparisons.
 - Multi-provider fallback + caching + rate-limit backoff + telemetry:
@@ -29,18 +31,21 @@ The default LLM client in this repo is OpenAI (`OPENAI_API_KEY`) and the tool lo
   - telemetry: `~/.web-scout/telemetry/web.jsonl`
 
 ### Scheduler + `/tasks` UI
+
 - Cron support (5-field: `m h dom mon dow`), interval schedules, one-time schedules.
 - Missed-run policies: `skip | catch_up_once | catch_up_all`.
 - Local commands to manage tasks without the LLM:
   - `/tasks list|show|enable|disable|delete|update`
 
 ### Document Ingestion + Citations
+
 - `ingest_document` tool indexes documents into `~/.web-scout/memory.sqlite` with embeddings.
 - `memory_search` returns the most relevant chunks and includes metadata:
   - source title / URL
   - PDF page number (when ingestion extracted per-page text)
 
 ### UX
+
 - Cleaner rendering (labels align correctly; markdown is rendered in terminal).
 - Optional tool-call trace cards: `/trace on`
 - Stop/cancel current run: `/stop`
@@ -79,6 +84,7 @@ flowchart TB
 ## Getting Started
 
 ### Prerequisites
+
 - Node.js 18+
 - An OpenAI API key (set `OPENAI_API_KEY`)
 
@@ -99,6 +105,7 @@ OPENAI_API_KEY=your_key_here
 ```
 
 Optional:
+
 - `WEBTOOLS_HEADLESS=false` to show the browser window
 - `WEBTOOLS_CHANNEL=chrome` to use installed Chrome
 - `SCOUT_DEBUG=1` or `--debug` to show internal browser/tool logs
@@ -110,18 +117,21 @@ node bin/scout.js
 ```
 
 Common flags:
+
 - `--trust-mode` (auto-approves prompts; not recommended for daily use)
 - `--debug` (verbose web tool logs)
 
 ---
 
 ## Built-in UI Commands
+
 - `exit` — quit
 - `/stop` — cancel the current agent run
 - `/trace on|off` — show/hide tool-call cards
 - `/dryrun on|off` — run tools in dry-run mode (no side effects)
 
 ### `/tasks`
+
 - `/tasks list`
 - `/tasks show <id>`
 - `/tasks disable <id>` / `/tasks enable <id>`
@@ -162,5 +172,5 @@ All state is stored under `~/.web-scout/`:
 ---
 
 ## Docs
-- Feature design/implementation notes: `docs/FEATURES_IMPLEMENTATION_GUIDE.md`
 
+- Feature design/implementation notes: `docs/FEATURES_IMPLEMENTATION_GUIDE.md`
