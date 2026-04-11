@@ -57,23 +57,30 @@ The default LLM client in this repo is OpenAI and the tool loop is implemented a
 
 ```mermaid
 flowchart TB
-  UI[Ink UI\nsrc/ui/App.tsx] -->|messages| Runner[Agent Loop\nsrc/agent/agentRunner.ts]
-  Runner -->|chat.completions| LLM[LLM Provider\nOpenAI SDK]
-  Runner -->|tool calls| Tools[Tools]
 
-  Tools --> Sys[System Tools\nsrc/tools/systemTools.ts]
-  Tools --> Web[Web Tools\nsrc/tools/webTools.ts]
+  UI["Ink UI<br/>src/ui/App.tsx"]
+      -->|messages| Runner["Agent Loop<br/>src/agent/agentRunner.ts"]
 
-  Sys --> Shield[Shield\nsrc/security/shield.ts]
-  Sys --> Perms[Permissions + Audit\nsrc/security/permissions.ts]
-  Sys --> FS[Filesystem / OS]
-  Sys --> Sched[Scheduler Store\nsrc/scheduler/tasks.ts]
-  Sys --> Ingest[Ingestion Pipeline\nsrc/ingest/pipeline.ts]
-  Ingest --> DB[(SQLite)\n~/.web-scout/memory.sqlite]
+  Runner
+      -->|chat.completions| LLM["LLM Provider<br/>OpenAI SDK"]
 
-  Web --> HTTP[HTTP fetch + extract]
-  Web --> PW[Playwright Browser]
-  Web --> Cache[Cache + Telemetry\n~/.web-scout/cache/web\n~/.web-scout/telemetry/web.jsonl]
+  Runner
+      -->|tool calls| Tools["Tools"]
+
+  Tools --> Sys["System Tools<br/>src/tools/systemTools.ts"]
+  Tools --> Web["Web Tools<br/>src/tools/webTools.ts"]
+
+  Sys --> Shield["Shield<br/>src/security/shield.ts"]
+  Sys --> Perms["Permissions + Audit<br/>src/security/permissions.ts"]
+  Sys --> FS["Filesystem / OS"]
+  Sys --> Sched["Scheduler Store<br/>src/scheduler/tasks.ts"]
+  Sys --> Ingest["Ingestion Pipeline<br/>src/ingest/pipeline.ts"]
+
+  Ingest --> DB[("SQLite DB<br/>memory.sqlite")]
+
+  Web --> HTTP["HTTP fetch + extract"]
+  Web --> PW["Playwright Browser"]
+  Web --> Cache["Cache + Telemetry<br/>web cache + telemetry logs"]
 
   UI -->|poll| Sched
   Sched -->|wakeups| Runner
